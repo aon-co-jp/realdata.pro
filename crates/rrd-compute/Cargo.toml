@@ -1,6 +1,6 @@
 [package]
 name = "rrd-compute"
-description = "rs-real-data 計算層: open-cuda(opencuda-blas GEMM)で重回帰などの行列演算を実行する"
+description = "realdata.pro 計算層: open-cuda(opencuda-blas GEMM)で重回帰などの行列演算を実行する"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

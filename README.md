@@ -1,4 +1,4 @@
-# rs-real-data
+# realdata.pro
 
 **誰でも使える、Rust製・オープンソースのデータ分析プラットフォーム**(SAS Viyaの考え方を参考にした自由実装)。
 大企業にも、中小企業にも、これから起業する人にも。CSVをドラッグするだけで、クレンジング・集計・予測まで。
@@ -17,12 +17,14 @@
 | Web サーバー・API | [RPoem](https://github.com/aon-co-jp/RPoem) `open-runo-poem-compat` + GraphQL 単一エンドポイント | ✅ |
 | ネットワーク基盤 | [open-web-server](https://github.com/aon-co-jp/open-web-server)(RPoem 経由で組込み)、本番の前段ゲートウェイ | ✅ 組込み / 🔜 realdata.pro 前段 |
 | データの永続化・版管理 | [aruaru-db](https://github.com/aon-co-jp/aruaru-db)(Git-on-SQL、`AS OF COMMIT` で過去の分析を再現) | 🔜 次段 |
-| AI による分析の説明・提案 | [aruaru-llm](https://github.com/aon-co-jp/aruaru-llm) | 🔜 次段 |
+| 検索ワードからの取り込み(Google / YouTube / GitHub) | [aruaru-llm](https://github.com/aon-co-jp/aruaru-llm) `POST /v1/search/raw` | ✅ |
+| 調査対象 URL からの取り込み(CSV・JSON・HTML の表) | 本リポジトリ(SSRF 対策付き) | ✅ |
+| AI による分析の説明(日本語・英語と約130言語から選択) | [aruaru-llm](https://github.com/aon-co-jp/aruaru-llm) | ✅ |
 | グラフ描画 | 棒グラフ・円グラフ(ブラウザ SVG)/ GPU 描画は [open-directx](https://github.com/aon-co-jp/open-directx) | ✅ 棒・円 / 🔜 GPU |
 
 ## SAS Viya の特徴との対応
 
-| SAS Viyaの特徴 | rs-real-data | 状態 |
+| SAS Viyaの特徴 | realdata.pro | 状態 |
 |---|---|---|
 | インメモリ分散処理エンジン(CAS) | 列指向 DataFrame + open-cuda | ✅ 単一ノード |
 | データ準備・クレンジング | 欠損補完・欠損行/重複行除去・フィルタ・並べ替え・列選択 | ✅ |
@@ -71,7 +73,7 @@ scripts/        fetch-deps(.deps/ への固定取得)
 
 ## English
 
-**rs-real-data** is an open-source analytics platform in Rust, inspired by SAS Viya (not affiliated with
+**realdata.pro** is an open-source analytics platform in Rust, inspired by SAS Viya (not affiliated with
 SAS Institute), built on the aon-co-jp ecosystem: a dependency-free columnar engine, open-cuda GEMM for
 regression, and a RPoem-based server exposing a single GraphQL endpoint plus a no-code web UI. aruaru-db
 persistence, aruaru-llm explanations and open-directx rendering are next. See [PORTING.md](PORTING.md).

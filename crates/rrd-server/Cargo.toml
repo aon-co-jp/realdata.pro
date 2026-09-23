@@ -1,6 +1,6 @@
 [package]
 name = "rrd-server"
-description = "rs-real-data サーバー: RPoem(open-runo-poem-compat)上で GraphQL 単一エンドポイントと Web UI を提供する"
+description = "realdata.pro サーバー: RPoem(open-runo-poem-compat)上で GraphQL 単一エンドポイントと Web UI を提供する"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -22,3 +22,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 http-body-util = "0.1"
 bytes = "1"
+anyhow = "1"
+futures = "0.3"
+# 調査対象 URL の取得と aruaru-llm 呼び出し(エコシステム既定の rustls、OpenSSL 不要)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+scraper = "0.20"

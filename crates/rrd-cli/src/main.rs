@@ -1,4 +1,4 @@
-//! rrd: rs-real-data コマンドライン。
+//! rrd: realdata.pro コマンドライン。
 //!
 //! 例:
 //!   rrd describe data.csv

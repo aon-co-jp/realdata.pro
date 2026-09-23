@@ -1,4 +1,4 @@
-//! rrd-server: rs-real-data の Web サーバー。
+//! rrd-server: realdata.pro の Web サーバー。
 //!
 //! RPoem(`open-runo-poem-compat`、tokio/hyper 自前実装)の上で次を提供する。
 //! 行列演算は open-cuda(`rrd-compute`)で実行する。
@@ -10,7 +10,11 @@
 //! 環境変数:
 //! - `RRD_BIND`      待受アドレス(既定 127.0.0.1:4701)
 //! - `RRD_MAX_BODY`  リクエストボディ上限バイト数(既定 32MiB)
+//! - `RRD_ARUARU_LLM_URL`  aruaru-llm の URL(既定 http://127.0.0.1:4600、検索取り込みと AI 説明に使う)
 
+mod explain;
+mod ingest;
+mod languages;
 mod schema;
 
 use std::collections::HashMap;
@@ -87,17 +91,20 @@ async fn main() -> std::io::Result<()> {
     let state = Arc::new(AppState {
         datasets: RwLock::new(HashMap::new()),
         device: rrd_compute::default_device(),
+        http: reqwest::Client::new(),
+        llm_base: std::env::var("RRD_ARUARU_LLM_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:4600".into()),
     });
-    println!("rs-real-data: 計算デバイス = {}", state.device.info().name);
+    println!("realdata.pro: 計算デバイス = {}", state.device.info().name);
     let schema = build_schema(state);
 
     let (addr, handle) = Server::new(TcpListener::bind(bind))
         .run(app(schema, max_body))
         .await?;
-    println!("rs-real-data: http://{addr}/ で待受中(GraphQL: POST /graphql)");
+    println!("realdata.pro: http://{addr}/ で待受中(GraphQL: POST /graphql)");
     tokio::select! {
         _ = handle => {}
-        _ = tokio::signal::ctrl_c() => println!("rs-real-data: 終了します"),
+        _ = tokio::signal::ctrl_c() => println!("realdata.pro: 終了します"),
     }
     Ok(())
 }

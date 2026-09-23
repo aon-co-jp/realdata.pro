@@ -1,4 +1,4 @@
-//! rs-real-data 計算層。
+//! realdata.pro 計算層。
 //!
 //! 行列演算は open-cuda の `opencuda_blas::sgemm` に任せる。デバイスは
 //! `opencuda_core::GpuDevice` として受け取るため、CPUバックエンド

@@ -1,4 +1,4 @@
-//! GraphQL スキーマ。rs-real-data の操作はすべてこの単一エンドポイントで行う
+//! GraphQL スキーマ。realdata.pro の操作はすべてこの単一エンドポイントで行う
 //! (エコシステム方針: REST エンドポイントを増やさない)。
 
 use std::collections::HashMap;
@@ -16,6 +16,9 @@ pub type RrdSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
 pub struct AppState {
     pub datasets: RwLock<HashMap<String, DataFrame>>,
     pub device: Arc<dyn GpuDevice>,
+    /// aruaru-llm への接続(検索の取り込みと、分析結果の説明に使う)。
+    pub http: reqwest::Client,
+    pub llm_base: String,
 }
 
 pub fn build_schema(state: Arc<AppState>) -> RrdSchema {
@@ -331,10 +334,66 @@ impl QueryRoot {
     async fn compute_device(&self, ctx: &Context<'_>) -> String {
         state(ctx).device.info().name.clone()
     }
+
+    /// 説明に使える言語の一覧(世界の主要な約130言語)。
+    async fn languages(&self) -> Vec<Language> {
+        crate::languages::LANGUAGES
+            .iter()
+            .map(|(c, ja, native)| Language {
+                code: c.to_string(),
+                name_ja: ja.to_string(),
+                native_name: native.to_string(),
+            })
+            .collect()
+    }
 }
 
 fn err_poison<T>(_: T) -> Error {
     Error::new("内部状態へのアクセスに失敗しました")
+}
+
+/// データセットを保存する(上限を確認し、同名は上書き)。
+fn store(ctx: &Context<'_>, name: String, df: DataFrame) -> Result<DatasetInfo> {
+    check_name(&name)?;
+    let mut map = state(ctx).datasets.write().map_err(err_poison)?;
+    if !map.contains_key(&name) && map.len() >= MAX_DATASETS {
+        return Err(Error::new(format!(
+            "データセットは最大{MAX_DATASETS}個までです"
+        )));
+    }
+    let info = DatasetInfo::of(&name, &df);
+    map.insert(name, df);
+    Ok(info)
+}
+
+#[derive(SimpleObject)]
+pub struct Language {
+    pub code: String,
+    pub name_ja: String,
+    pub native_name: String,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+pub enum SearchSource {
+    Google,
+    Youtube,
+    Github,
+}
+
+/// CSV 以外からの取り込み結果。
+#[derive(SimpleObject)]
+pub struct ImportResult {
+    pub dataset: DatasetInfo,
+    /// どの方法で表にしたか(例: "HTMLの表(12行)")。
+    pub method: String,
+}
+
+#[derive(SimpleObject)]
+pub struct Explanation {
+    pub lang: String,
+    pub language_name: String,
+    pub text: String,
+    pub provider: Option<String>,
 }
 
 pub struct MutationRoot;
@@ -345,15 +404,88 @@ impl MutationRoot {
     async fn load_csv(&self, ctx: &Context<'_>, name: String, csv: String) -> Result<DatasetInfo> {
         check_name(&name)?;
         let df = rrd_core::csv::read_csv_str(&csv).map_err(err)?;
-        let mut map = state(ctx).datasets.write().map_err(err_poison)?;
-        if !map.contains_key(&name) && map.len() >= MAX_DATASETS {
-            return Err(Error::new(format!(
-                "データセットは最大{MAX_DATASETS}個までです"
-            )));
+        store(ctx, name, df)
+    }
+
+    /// 検索ワードで Google / YouTube / GitHub を検索し、結果をデータセットにする(aruaru-llm 経由)。
+    async fn import_search(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        source: SearchSource,
+        query: String,
+        #[graphql(default = 10)] max_results: u8,
+    ) -> Result<ImportResult> {
+        check_name(&name)?;
+        let st = state(ctx);
+        let src = match source {
+            SearchSource::Google => crate::ingest::SearchSource::Google,
+            SearchSource::Youtube => crate::ingest::SearchSource::Youtube,
+            SearchSource::Github => crate::ingest::SearchSource::Github,
+        };
+        let im = crate::ingest::import_search(
+            &st.http,
+            &st.llm_base,
+            src,
+            query.trim(),
+            max_results.clamp(1, 20),
+        )
+        .await
+        .map_err(|e| Error::new(format!("{e:#}")))?;
+        Ok(ImportResult {
+            dataset: store(ctx, name, im.df)?,
+            method: im.method,
+        })
+    }
+
+    /// 調査対象の URL を取得して表にする(CSV・JSON・HTML の表、表が無ければリンク一覧)。
+    async fn import_url(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        url: String,
+    ) -> Result<ImportResult> {
+        check_name(&name)?;
+        let im = crate::ingest::import_url(&url)
+            .await
+            .map_err(|e| Error::new(format!("{e:#}")))?;
+        Ok(ImportResult {
+            dataset: store(ctx, name, im.df)?,
+            method: im.method,
+        })
+    }
+
+    /// 分析結果を AI(aruaru-llm)が選んだ言語で説明する。
+    /// 要約統計と `analysis`(画面の分析結果)を送る。外部 AI へ送られ得るため `consent` が必須。
+    async fn explain(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        languages: Vec<String>,
+        consent: bool,
+        analysis: Option<String>,
+        #[graphql(default = false)] include_sample: bool,
+    ) -> Result<Vec<Explanation>> {
+        if !consent {
+            return Err(Error::new("AI に分析内容を送ることへの同意が必要です"));
         }
-        let info = DatasetInfo::of(&name, &df);
-        map.insert(name, df);
-        Ok(info)
+        let brief = with_dataset(ctx, &name, |df| {
+            crate::explain::build_brief(&name, df, analysis.as_deref(), include_sample)
+                .map_err(|e| Error::new(e.to_string()))
+        })?;
+        let st = state(ctx);
+        let out = crate::explain::explain(&st.http, &st.llm_base, &brief, &languages)
+            .await
+            .map_err(|e| Error::new(format!("{e:#}")))?;
+        Ok(out
+            .into_iter()
+            .map(|x| Explanation {
+                lang: x.lang,
+                language_name: x.language_name,
+                text: x.text,
+                provider: x.provider,
+            })
+            .collect())
     }
 
     /// クレンジング・抽出を適用した結果を新しいデータセット `into` として保存する。
@@ -366,15 +498,7 @@ impl MutationRoot {
     ) -> Result<DatasetInfo> {
         check_name(&into)?;
         let out = with_dataset(ctx, &source, |df| apply_transform(df, &steps).map_err(err))?;
-        let mut map = state(ctx).datasets.write().map_err(err_poison)?;
-        if !map.contains_key(&into) && map.len() >= MAX_DATASETS {
-            return Err(Error::new(format!(
-                "データセットは最大{MAX_DATASETS}個までです"
-            )));
-        }
-        let info = DatasetInfo::of(&into, &out);
-        map.insert(into, out);
-        Ok(info)
+        store(ctx, into, out)
     }
 
     /// データセットを削除する。存在していれば true。
@@ -396,6 +520,8 @@ mod tests {
         build_schema(Arc::new(AppState {
             datasets: RwLock::new(HashMap::new()),
             device: rrd_compute::default_device(),
+            http: reqwest::Client::new(),
+            llm_base: "http://127.0.0.1:1".into(),
         }))
     }
 

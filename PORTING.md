@@ -26,17 +26,37 @@
 |---|---|---|
 | P0 | 列指向 DataFrame・CSV 入出力・型推論・クレンジング・要約統計・group by・相関・単回帰・CLI | ✅ 2026-09-24 |
 | P1 | open-cuda で重回帰、RPoem + GraphQL サーバー、ノーコード Web UI、依存の固定取得 | ✅ 2026-09-24 |
+| P1.5 | 取り込み元の追加: 検索ワード(Google / YouTube / GitHub、aruaru-llm `POST /v1/search/raw` 経由)、調査対象 URL(CSV・JSON・HTML の表・リンク一覧、SSRF 対策付き) | ✅ 2026-09-24 |
+| P3 | aruaru-llm 連携: 分析結果を日本語・英語と、約130言語から選んだ1言語で説明する(同意必須、生データは既定で送らない) | ✅ 2026-09-24 |
 | P2 | aruaru-db 連携: データセットの保存・読込、`commit()` で分析の版を記録し、`AS OF COMMIT` で再現する | 次 |
-| P3 | aruaru-llm 連携: 要約統計・回帰結果を平易な日本語で説明し、次の分析を提案する | |
-| P4 | open-directx 連携: GPU でグラフを描画(サーバー側 PNG、デスクトップビューア) | |
+| P4 | open-directx 連携: GPU でグラフを描画する。GPU が無い環境では、open-cpu の実行時 CPU 判定を使い、AVX-512・AVX2 など、その CPU で使える最速の SIMD 命令で描画する(サーバー側 PNG、デスクトップビューア) | |
 | P5 | realdata.pro 公開: open-web-server を前段(TLS/ACME・ドメイン振り分け)にして VPS で運用する | |
 | P6 | 日付型・join・ピボット・Parquet、ロジスティック回帰・決定木・k-means | |
 | P7 | GPU バックエンド(Vulkan/DirectX)での GEMM、複数ノード分散 | |
+
+## API キーの共有(2026-09-24)
+
+検索(Google / YouTube / GitHub)と AI のキーは、**aruaru-llm の設定1か所を正本**とし、realdata.pro は
+キーを持たない(コピーしない)。realdata.pro は `RRD_ARUARU_LLM_URL` で aruaru-llm を呼ぶだけにする。
+
+- VPS では、open-english と realdata.pro が同じ aruaru-llm(`127.0.0.1:4600`)を使う。
+  キーは `/root/aruaru-llm/.env.google-search` などにある。
+  ここへキーを追加・変更すると、両方に自動で即時反映される(コピーしないので、片方だけ古いままになるずれも起きない)。
+- open-english の画面で利用者がブラウザに保存するキー(localStorage / vault)は、その利用者のブラウザにだけ存在する。
+  別オリジン(realdata.pro)からは読み取れないため、自動共有の対象外。
+- 2026-09-24 時点のローカル検証: 開発機のキー(`F:\API.txt`)では、Google Custom Search JSON API が
+  「このプロジェクトは API へのアクセス権がない」(HTTP 403)を返した。VPS の設定での動作確認は、デプロイ後に行う。
 
 ## 実装メモ
 
 - `Column` は型ごとの `Vec<Option<T>>`(int/float/bool/str)。`None` が欠損。
 - CSV の型推論は int → float → bool → str の順。欠損とみなす値: 空欄 / `NA` / `N/A` / `null` / `NULL` / `NaN`。
+  3桁区切りのカンマ(`8,021,407,192`)は数値として扱う(区切り位置が不正なものは文字列のまま)。
+- URL 取り込みの SSRF 対策: 許可するのは http/https のみ。名前解決したすべての IP を検査し、1つでも内部向けなら拒否する
+  (私設・ループバック・リンクローカル・CGNAT・NAT64 等)。接続は検証済みの IP へ固定する。
+  リダイレクトは手動で追い、1段ごとに再検証する(最大5回)。応答は 16MiB・20秒まで。
+- AI 説明に渡すのは、要約統計と、画面に出ている分析結果の文字だけ。生データは、利用者が選んだ場合に限り先頭10行を渡す。
+  AI の回答は、innerHTML を使わずに要素を組み立てて表示する(見出し・太字・箇条書きのみ対応)。
 - 数値列を平均値・中央値で補完すると float 列になる。フィルタでは欠損の行を常に除外する。
 - 重回帰: 説明変数と目的変数を平均で中心化した拡大行列 A について、AᵀA を open-cuda の `sgemm`(f32)で求める。
   XᵀX と Xᵀy はそこから取り出し、部分ピボット付きガウス消去(f64)で解く。R² は元データから f64 で計算する。

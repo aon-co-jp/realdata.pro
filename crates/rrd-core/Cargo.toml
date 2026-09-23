@@ -1,6 +1,6 @@
 [package]
 name = "rrd-core"
-description = "rs-real-data: インメモリ列指向データエンジン(読込・クレンジング・集計・統計)"
+description = "realdata.pro: インメモリ列指向データエンジン(読込・クレンジング・集計・統計)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

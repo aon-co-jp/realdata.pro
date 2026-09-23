@@ -1,6 +1,6 @@
 [package]
 name = "rrd-cli"
-description = "rs-real-data コマンドラインツール"
+description = "realdata.pro コマンドラインツール"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

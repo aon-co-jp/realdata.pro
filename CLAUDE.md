@@ -1,6 +1,6 @@
-# 開発方針(rs-real-data)
+# 開発方針(realdata.pro)
 
-作業ドライブは `F:\rs-real-data`。全リポジトリ共通ルールは
+作業ドライブは `F:\realdata.pro`。全リポジトリ共通ルールは
 [`open-raid-z/CLAUDE.md`](https://github.com/aon-co-jp/open-raid-z) を正本として参照すること。
 
 ## このリポジトリの役割
@@ -40,5 +40,13 @@ cargo run -p rrd-server        # http://127.0.0.1:4701/
     重回帰の係数は、厳密な有理数計算と一致した。
   - 同じセッションで `cargo fmt --all` の事故が起きた。これを受けて、依存を固定して取得する設計(`deps.lock` / `.deps/`)に切り替えた。
   - 次は P2(aruaru-db)→ P3(aruaru-llm)→ P4(open-directx)→ P5(realdata.pro 公開)。
+- **2026-09-24 続き**:
+  - ユーザー指示により、リポジトリ名を `rs-real-data` から `realdata.pro` に変更した(GitHub・ローカルフォルダとも)。
+  - 取り込み元に、検索ワード(Google/YouTube/GitHub)と調査対象 URL を追加した。
+  - aruaru-llm での多言語説明(日本語・英語と、約130言語から選んだ1言語)を追加した。
+  - aruaru-llm 側には `POST /v1/search/raw` を新設した。
+  - キーは aruaru-llm の設定を正本として共有する(PORTING.md「API キーの共有」)。
+  - GitHub 検索・URL 取り込み・SSRF 拒否・3言語の説明は、ブラウザで確認済み。
+  - Google 検索は、開発機のキーでは 403 だった。VPS で要確認。
 - realdata.pro は、作成時点で DNS の委任が完了していない(レジストリに NS が未登録、ConoHa DNS にゾーンが未作成)。
 - `.github/workflows/ci.yml` は、gh トークンに `workflow` 権限が付くまで push できない。

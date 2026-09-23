@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rs-real-data</title>
+<title>realdata.pro</title>
 <style>
 :root{--bg:#f7f8fa;--panel:#fff;--text:#1d2330;--muted:#5f6878;--line:#dfe3ea;--accent:#2f6fde;--accent-ink:#fff;--err:#c62f2f;--bar:#2f6fde}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151b;--panel:#1b2029;--text:#e6e9ef;--muted:#9aa3b2;--line:#2c3340;--accent:#6b9cff;--accent-ink:#0b1020;--err:#ff7b7b;--bar:#6b9cff}}
@@ -36,21 +36,46 @@ td.null{color:var(--muted);font-style:italic}
 .aggs{display:grid;gap:6px}
 .aggs div{display:flex;gap:6px}
 svg text{fill:var(--text);font-size:12px}
+.explain{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}
+.explain h3{font-size:15px;margin:4px 0}
+.explain-text h4{font-size:14px;margin:12px 0 4px}
+.explain-text p{margin:4px 0}
+.explain-text ul,.explain-text ol{margin:4px 0;padding-left:22px}
+button:disabled{opacity:.5;cursor:progress}
 </style>
 </head>
 <body>
-<header><h1>rs-real-data</h1><small>Rust製インメモリ分析 · RPoem + open-cuda · <span id="device">…</span></small></header>
+<header><h1>realdata.pro</h1><small>Rust製インメモリ分析 · RPoem + open-cuda · <span id="device">…</span></small></header>
 <main>
   <section>
     <h2>1. データを読み込む</h2>
-    <div class="row">
-      <div><label for="file">CSVファイル</label><input id="file" type="file" accept=".csv,text/csv"></div>
-      <div><label for="dsname">データセット名</label><input id="dsname" type="text" value="data"></div>
+    <div class="tabs" role="tablist" aria-label="取り込み元">
+      <button role="tab" data-src="csv" aria-selected="true">CSVファイル</button>
+      <button role="tab" data-src="search">検索ワード</button>
+      <button role="tab" data-src="url">調査対象URL</button>
     </div>
-    <label for="csv">またはCSVを貼り付け(1行目はヘッダ)</label>
-    <textarea id="csv" placeholder="city,sales,qty&#10;Tokyo,100,1"></textarea>
-    <button id="load">読み込む</button>
-    <button id="sample" class="secondary">サンプルデータで試す</button>
+    <label for="dsname">データセット名</label><input id="dsname" type="text" value="data">
+    <div data-srcpanel="csv">
+      <label for="file">CSVファイル</label><input id="file" type="file" accept=".csv,text/csv">
+      <label for="csv">またはCSVを貼り付け(1行目はヘッダ)</label>
+      <textarea id="csv" placeholder="city,sales,qty&#10;Tokyo,100,1"></textarea>
+      <button id="load">読み込む</button>
+      <button id="sample" class="secondary">サンプルデータで試す</button>
+    </div>
+    <div data-srcpanel="search" hidden>
+      <div class="row">
+        <div><label for="sSource">検索先</label><select id="sSource"><option value="GOOGLE">Google</option><option value="YOUTUBE">YouTube</option><option value="GITHUB">GitHub</option></select></div>
+        <div><label for="sQuery">検索ワード</label><input id="sQuery" type="text" placeholder="例: 地域 売上 分析"></div>
+        <div><label for="sMax">件数</label><select id="sMax"><option>5</option><option selected>10</option><option>20</option></select></div>
+      </div>
+      <button id="doSearch">検索して取り込む</button>
+      <p class="meta">検索は aruaru-llm 経由で行います(キーは aruaru-llm の設定を共有)。結果のタイトル・URL・説明・スター数などを表にします。</p>
+    </div>
+    <div data-srcpanel="url" hidden>
+      <label for="uUrl">調査対象URL</label><input id="uUrl" type="text" placeholder="https://example.com/data.csv や 表のあるページ">
+      <button id="doUrl">取得して取り込む</button>
+      <p class="meta">CSV・JSON・HTMLの表を自動で読み取ります。表が無いページはリンク一覧を表にします。社内ネットワークのアドレスは取得しません。</p>
+    </div>
     <div id="loadmsg" class="meta"></div>
   </section>
 
@@ -65,6 +90,7 @@ svg text{fill:var(--text);font-size:12px}
       <button role="tab" data-tab="cleanse">クレンジング</button>
       <button role="tab" data-tab="group">集計</button>
       <button role="tab" data-tab="regress">回帰</button>
+      <button role="tab" data-tab="explain">AIで説明</button>
     </div>
 
     <div data-panel="preview"><button id="doPreview">表示</button></div>
@@ -98,6 +124,16 @@ svg text{fill:var(--text);font-size:12px}
       </div>
       <button id="doRegress">重回帰(open-cuda)</button>
     </div>
+    <div data-panel="explain" hidden>
+      <div class="row">
+        <div><label>説明する言語</label><label><input type="checkbox" id="lJa" checked> 日本語</label><label><input type="checkbox" id="lEn" checked> 英語</label></div>
+        <div><label for="lOther">もう1言語(世界の約130言語から選択)</label><select id="lOther"><option value="">(選ばない)</option></select></div>
+      </div>
+      <label><input type="checkbox" id="useLast" checked> 直前に表示した分析結果(集計表・回帰式など)も説明に含める</label>
+      <label><input type="checkbox" id="incSample"> 先頭10行の生データも渡す(より具体的になりますが、個人情報を含む場合は避けてください)</label>
+      <label><input type="checkbox" id="consent"> 要約統計と上記の内容を AI(aruaru-llm 経由で外部の AI 事業者を含む)へ送ることに同意します</label>
+      <button id="doExplain">AIで説明する</button>
+    </div>
     <div class="out" id="out"></div>
   </section>
 </main>
@@ -111,7 +147,7 @@ async function gql(query, variables = {}) {
   if (j.errors && j.errors.length) throw new Error(j.errors.map(e => e.message).join('\n'));
   return j.data;
 }
-function showError(e) { $('out').innerHTML = ''; const p = document.createElement('p'); p.className = 'err'; p.textContent = e.message || String(e); $('out').append(p); }
+function showError(e) { $('out').innerHTML = ''; const p = document.createElement('p'); p.className = 'err explain'; p.textContent = e.message || String(e); $('out').append(p); }
 function el(tag, attrs = {}, text) { const e = document.createElement(tag); Object.assign(e, attrs); if (text !== undefined) e.textContent = text; return e; }
 
 function renderTable(t, target = $('out')) {
@@ -248,11 +284,96 @@ const SAMPLE = `date,city,category,sales,qty,ad_cost
 `;
 $('sample').onclick = () => { $('csv').value = SAMPLE; $('dsname').value = 'sample_sales'; $('load').click(); };
 $('ds').onchange = () => onDataset(window._list);
-document.querySelectorAll('[role=tab]').forEach(b => b.onclick = () => {
-  document.querySelectorAll('[role=tab]').forEach(x => x.setAttribute('aria-selected', x === b));
+document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-tab]').forEach(x => x.setAttribute('aria-selected', x === b));
   document.querySelectorAll('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== b.dataset.tab);
-  $('out').innerHTML = '';
+  if (b.dataset.tab !== 'explain') $('out').innerHTML = '';
 });
+document.querySelectorAll('[data-src]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-src]').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('[data-srcpanel]').forEach(p => p.hidden = p.dataset.srcpanel !== b.dataset.src);
+});
+
+// 取り込み(検索ワード・調査対象URL)の共通処理
+async function importVia(query, vars, key, busyBtn) {
+  busyBtn.disabled = true; $('loadmsg').textContent = '取り込み中…';
+  try {
+    const d = await gql(query, vars);
+    $('loadmsg').textContent = `${d[key].dataset.name} に取り込みました(${d[key].dataset.rows}行、方法: ${d[key].method})`;
+    await refresh(d[key].dataset.name); $('doPreview').click();
+  } catch (e) { $('loadmsg').textContent = ''; showError(e); }
+  finally { busyBtn.disabled = false; }
+}
+function safeName(s, fallback) { return (s || '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 64) || fallback; }
+$('doSearch').onclick = () => {
+  const q = $('sQuery').value.trim(); if (!q) { showError(new Error('検索ワードを入力してください')); return; }
+  const src = $('sSource').value;
+  if ($('dsname').value === 'data') $('dsname').value = safeName(`${src.toLowerCase()}_${q}`, src.toLowerCase());
+  importVia('mutation($n:String!,$s:SearchSource!,$q:String!,$m:Int!){ importSearch(name:$n, source:$s, query:$q, maxResults:$m){ method dataset{ name rows } } }',
+    { n: $('dsname').value, s: src, q, m: Number($('sMax').value) }, 'importSearch', $('doSearch'));
+};
+$('doUrl').onclick = () => {
+  const u = $('uUrl').value.trim(); if (!u) { showError(new Error('URLを入力してください')); return; }
+  if ($('dsname').value === 'data') { try { $('dsname').value = safeName(new URL(u).hostname, 'url'); } catch (_) {} }
+  importVia('mutation($n:String!,$u:String!){ importUrl(name:$n, url:$u){ method dataset{ name rows } } }', { n: $('dsname').value, u }, 'importUrl', $('doUrl'));
+};
+
+// AI の回答(Markdown の一部)を安全に表示する。innerHTML は使わず要素を組み立てる。
+function inlineMd(parent, text) {
+  text.split(/(\*\*[^*]+\*\*)/g).forEach(part => {
+    if (/^\*\*[^*]+\*\*$/.test(part)) parent.append(el('strong', {}, part.slice(2, -2)));
+    else if (part) parent.append(document.createTextNode(part));
+  });
+}
+function renderMd(text) {
+  const root = el('div', { className: 'explain-text' });
+  let list = null;
+  for (const raw of text.split('\n')) {
+    const line = raw.trimEnd();
+    const bullet = line.match(/^\s*(?:[-*・]|\d+[.)])\s+(.*)$/);
+    if (bullet) { if (!list) { list = el(/^\s*\d/.test(line) ? 'ol' : 'ul'); root.append(list); } const li = el('li'); inlineMd(li, bullet[1]); list.append(li); continue; }
+    list = null;
+    if (!line.trim()) continue;
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) continue;
+    const h = line.match(/^\s*#{1,6}\s+(.*)$/);
+    if (h) { const e = el('h4'); inlineMd(e, h[1]); root.append(e); continue; }
+    const p = el('p'); inlineMd(p, line); root.append(p);
+  }
+  return root;
+}
+
+// AIによる説明: 直前に画面に出した分析結果(表・回帰式)を文字にして添える
+let lastAnalysis = '';
+new MutationObserver(() => {
+  const out = $('out');
+  if (!out.querySelector('.explain') && out.innerText.trim()) lastAnalysis = out.innerText.trim().slice(0, 7000);
+}).observe($('out'), { childList: true, subtree: true });
+$('doExplain').onclick = async () => {
+  const langs = [];
+  if ($('lJa').checked) langs.push('ja');
+  if ($('lEn').checked) langs.push('en');
+  if ($('lOther').value) langs.push($('lOther').value);
+  if (!langs.length) { showError(new Error('説明する言語を1つ以上選んでください')); return; }
+  if (!$('consent').checked) { showError(new Error('AI へ送ることへの同意にチェックを入れてください')); return; }
+  $('doExplain').disabled = true; $('out').innerHTML = ''; $('out').append(el('p', { className: 'meta explain' }, 'AI が説明を作成中です(数十秒かかることがあります)…'));
+  try {
+    const d = await gql('mutation($n:String!,$l:[String!]!,$c:Boolean!,$a:String,$s:Boolean!){ explain(name:$n, languages:$l, consent:$c, analysis:$a, includeSample:$s){ lang languageName text provider } }',
+      { n: current?.name ?? '', l: langs, c: true, a: $('useLast').checked ? lastAnalysis : null, s: $('incSample').checked });
+    $('out').innerHTML = '';
+    for (const x of d.explain) {
+      const box = el('div', { className: 'explain' });
+      const body = renderMd(x.text); body.lang = x.lang;
+      if (['ar', 'he', 'fa', 'ur', 'ps', 'ckb', 'dv', 'yi', 'ug'].includes(x.lang)) body.dir = 'rtl';
+      box.append(el('h3', {}, x.languageName), body);
+      if (x.provider) box.append(el('p', { className: 'meta' }, `AI: ${x.provider}`));
+      $('out').append(box);
+    }
+  } catch (e) { showError(e); }
+  finally { $('doExplain').disabled = false; }
+};
+gql('{ languages { code nameJa nativeName } }').then(d => {
+  for (const l of d.languages) if (l.code !== 'ja' && l.code !== 'en') $('lOther').append(el('option', { value: l.code }, `${l.nameJa} — ${l.nativeName}`));
+}).catch(() => {});
 $('doPreview').onclick = async () => { try { renderTable((await gql('query($n:String!){ preview(name:$n, limit:100){ columns dtypes rows totalRows } }', { n: current?.name ?? '' })).preview); } catch (e) { showError(e); } };
 $('doDescribe').onclick = async () => { try { renderTable((await gql('query($n:String!){ describe(name:$n){ columns dtypes rows totalRows } }', { n: current?.name ?? '' })).describe); } catch (e) { showError(e); } };
 $('addAgg').onclick = addAgg;
