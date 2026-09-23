@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rs-real-data</title>
+<style>
+:root{--bg:#f7f8fa;--panel:#fff;--text:#1d2330;--muted:#5f6878;--line:#dfe3ea;--accent:#2f6fde;--accent-ink:#fff;--err:#c62f2f;--bar:#2f6fde}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151b;--panel:#1b2029;--text:#e6e9ef;--muted:#9aa3b2;--line:#2c3340;--accent:#6b9cff;--accent-ink:#0b1020;--err:#ff7b7b;--bar:#6b9cff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif}
+header{padding:16px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+header h1{font-size:20px;margin:0}
+header small{color:var(--muted)}
+main{max-width:1200px;margin:0 auto;padding:16px;display:grid;gap:16px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+h2{font-size:16px;margin:0 0 12px}
+label{display:block;font-size:13px;color:var(--muted);margin:8px 0 4px}
+input,select,textarea,button{font:inherit;color:inherit}
+input[type=text],select,textarea{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+textarea{min-height:110px;font-family:ui-monospace,Consolas,monospace;font-size:13px}
+button{padding:8px 14px;border:0;border-radius:6px;background:var(--accent);color:var(--accent-ink);cursor:pointer;margin-top:10px}
+button.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tabs button{margin:0;background:transparent;color:var(--muted);border:1px solid var(--line)}
+.tabs button[aria-selected=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.out{overflow-x:auto;margin-top:12px}
+table{border-collapse:collapse;font-size:13px;white-space:nowrap}
+th,td{border-bottom:1px solid var(--line);padding:4px 10px;text-align:left}
+th{color:var(--muted);font-weight:600}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.null{color:var(--muted);font-style:italic}
+.err{color:var(--err);white-space:pre-wrap}
+.meta{color:var(--muted);font-size:13px}
+.aggs{display:grid;gap:6px}
+.aggs div{display:flex;gap:6px}
+svg text{fill:var(--text);font-size:12px}
+</style>
+</head>
+<body>
+<header><h1>rs-real-data</h1><small>Rust製インメモリ分析 · RPoem + open-cuda · <span id="device">…</span></small></header>
+<main>
+  <section>
+    <h2>1. データを読み込む</h2>
+    <div class="row">
+      <div><label for="file">CSVファイル</label><input id="file" type="file" accept=".csv,text/csv"></div>
+      <div><label for="dsname">データセット名</label><input id="dsname" type="text" value="data"></div>
+    </div>
+    <label for="csv">またはCSVを貼り付け(1行目はヘッダ)</label>
+    <textarea id="csv" placeholder="city,sales,qty&#10;Tokyo,100,1"></textarea>
+    <button id="load">読み込む</button>
+    <button id="sample" class="secondary">サンプルデータで試す</button>
+    <div id="loadmsg" class="meta"></div>
+  </section>
+
+  <section>
+    <h2>2. 分析する</h2>
+    <label for="ds">データセット</label>
+    <select id="ds"></select>
+    <div class="meta" id="dsinfo"></div>
+    <div class="tabs" role="tablist" style="margin-top:12px">
+      <button role="tab" data-tab="preview" aria-selected="true">プレビュー</button>
+      <button role="tab" data-tab="describe">要約統計</button>
+      <button role="tab" data-tab="cleanse">クレンジング</button>
+      <button role="tab" data-tab="group">集計</button>
+      <button role="tab" data-tab="regress">回帰</button>
+    </div>
+
+    <div data-panel="preview"><button id="doPreview">表示</button></div>
+    <div data-panel="describe" hidden><button id="doDescribe">計算</button></div>
+    <div data-panel="cleanse" hidden>
+      <div class="row">
+        <div><label><input type="checkbox" id="dedup"> 重複行を削除</label><label><input type="checkbox" id="dropNulls"> 欠損を含む行を削除</label></div>
+        <div><label for="fillCol">欠損を補完する列</label><select id="fillCol"></select></div>
+        <div><label for="fillHow">補完方法</label><select id="fillHow"><option value="">しない</option><option value="MEAN">平均</option><option value="MEDIAN">中央値</option><option value="VALUE">値を指定</option></select></div>
+        <div><label for="fillVal">補完値</label><input id="fillVal" type="text"></div>
+      </div>
+      <div class="row">
+        <div><label for="filters">フィルタ(1行に1つ、例: sales&gt;=100)</label><textarea id="filters" style="min-height:60px"></textarea></div>
+        <div><label for="sortBy">並べ替え</label><select id="sortBy"></select><label><input type="checkbox" id="desc"> 降順</label></div>
+        <div><label for="into">保存先の名前</label><input id="into" type="text" value="cleaned"></div>
+      </div>
+      <button id="doCleanse">適用して保存</button>
+    </div>
+    <div data-panel="group" hidden>
+      <div class="row">
+        <div><label for="gKey">キー列</label><select id="gKey"></select></div>
+        <div><label>集計(列と関数)</label><div class="aggs" id="aggs"></div><button class="secondary" id="addAgg">＋ 集計を追加</button></div>
+        <div><label for="chartType">グラフ(1つ目の集計を表示)</label><select id="chartType"><option value="bar">棒グラフ</option><option value="pie">円グラフ</option><option value="">表示しない</option></select></div>
+      </div>
+      <button id="doGroup">集計</button>
+    </div>
+    <div data-panel="regress" hidden>
+      <div class="row">
+        <div><label for="rTarget">目的変数</label><select id="rTarget"></select></div>
+        <div><label for="rFeatures">説明変数(複数選択可)</label><select id="rFeatures" multiple size="5"></select></div>
+      </div>
+      <button id="doRegress">重回帰(open-cuda)</button>
+    </div>
+    <div class="out" id="out"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null; // 選択中データセットの情報
+
+async function gql(query, variables = {}) {
+  const r = await fetch('/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query, variables }) });
+  const j = await r.json();
+  if (j.errors && j.errors.length) throw new Error(j.errors.map(e => e.message).join('\n'));
+  return j.data;
+}
+function showError(e) { $('out').innerHTML = ''; const p = document.createElement('p'); p.className = 'err'; p.textContent = e.message || String(e); $('out').append(p); }
+function el(tag, attrs = {}, text) { const e = document.createElement(tag); Object.assign(e, attrs); if (text !== undefined) e.textContent = text; return e; }
+
+function renderTable(t, target = $('out')) {
+  target.innerHTML = '';
+  const table = el('table'); const thead = el('thead'); const tr = el('tr');
+  t.columns.forEach((c, i) => tr.append(el('th', { title: t.dtypes[i] }, c)));
+  thead.append(tr); table.append(thead);
+  const tb = el('tbody');
+  const numeric = t.dtypes.map(d => d === 'int' || d === 'float');
+  for (const row of t.rows) {
+    const r = el('tr');
+    row.forEach((v, i) => r.append(v === null ? el('td', { className: 'null' }, 'null') : el('td', { className: numeric[i] ? 'num' : '' }, fmt(v, numeric[i]))));
+    tb.append(r);
+  }
+  table.append(tb); target.append(table);
+  if (t.totalRows > t.rows.length) target.append(el('p', { className: 'meta' }, `全${t.totalRows}行のうち先頭${t.rows.length}行`));
+}
+function fmt(v, isNum) { if (!isNum) return v; const n = Number(v); return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 4 }); }
+
+function barChart(t) {
+  // 集計結果の2列目を棒グラフで表示(サーバー側描画は open-directx 連携で今後対応)
+  if (t.columns.length < 2 || !t.rows.length) return null;
+  const vals = t.rows.map(r => Number(r[1]) || 0), max = Math.max(...vals, 0) || 1;
+  const w = 560, bh = 24, pad = 110, h = t.rows.length * (bh + 6) + 10;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', `0 0 ${w} ${h}`); svg.setAttribute('width', '100%'); svg.style.maxWidth = w + 'px';
+  svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `${t.columns[1]} の棒グラフ`);
+  t.rows.forEach((r, i) => {
+    const y = 5 + i * (bh + 6), bw = (w - pad - 80) * vals[i] / max;
+    const lab = document.createElementNS(ns, 'text'); lab.setAttribute('x', pad - 8); lab.setAttribute('y', y + 16); lab.setAttribute('text-anchor', 'end'); lab.textContent = r[0] ?? 'null';
+    const rect = document.createElementNS(ns, 'rect'); rect.setAttribute('x', pad); rect.setAttribute('y', y); rect.setAttribute('width', Math.max(bw, 1)); rect.setAttribute('height', bh); rect.setAttribute('rx', 3); rect.setAttribute('fill', 'var(--bar)');
+    const val = document.createElementNS(ns, 'text'); val.setAttribute('x', pad + bw + 6); val.setAttribute('y', y + 16); val.textContent = fmt(String(vals[i]), true);
+    svg.append(lab, rect, val);
+  });
+  return svg;
+}
+
+// 円グラフ用の区別しやすい配色(ライト/ダーク両方で判読できる中間明度)
+const PIE_COLORS = ['#2f6fde', '#e8743b', '#19a979', '#d64f8c', '#945ecf', '#c9a227', '#13a4b4', '#8a8f99'];
+function pieChart(t) {
+  if (t.columns.length < 2 || !t.rows.length) return null;
+  let items = t.rows.map(r => ({ label: r[0] ?? 'null', value: Number(r[1]) }));
+  if (items.some(x => !Number.isFinite(x.value))) return el('p', { className: 'meta' }, '円グラフ: 欠損値を含むため表示できません。');
+  if (items.some(x => x.value < 0)) return el('p', { className: 'meta' }, '円グラフ: 負の値を含むため表示できません(棒グラフを使ってください)。');
+  items.sort((a, b) => b.value - a.value);
+  if (items.length > 8) { // 上位7件 + その他
+    const rest = items.slice(7).reduce((s, x) => s + x.value, 0);
+    items = items.slice(0, 7).concat([{ label: `その他(${t.rows.length - 7}件)`, value: rest }]);
+  }
+  const total = items.reduce((s, x) => s + x.value, 0);
+  if (total <= 0) return el('p', { className: 'meta' }, '円グラフ: 合計が0のため表示できません。');
+  const ns = 'http://www.w3.org/2000/svg', R = 110, cx = 130, cy = 130, legendX = 280;
+  const h = Math.max(260, items.length * 26 + 20);
+  const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', `0 0 560 ${h}`); svg.setAttribute('width', '100%'); svg.style.maxWidth = '560px';
+  svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `${t.columns[1]} の円グラフ`);
+  let a0 = -Math.PI / 2;
+  items.forEach((x, i) => {
+    const frac = x.value / total, a1 = a0 + frac * 2 * Math.PI, color = PIE_COLORS[i % PIE_COLORS.length];
+    let shape;
+    if (frac >= 0.9999) { shape = document.createElementNS(ns, 'circle'); shape.setAttribute('cx', cx); shape.setAttribute('cy', cy); shape.setAttribute('r', R); }
+    else {
+      shape = document.createElementNS(ns, 'path');
+      const p = (a) => `${cx + R * Math.cos(a)} ${cy + R * Math.sin(a)}`;
+      shape.setAttribute('d', `M ${cx} ${cy} L ${p(a0)} A ${R} ${R} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${p(a1)} Z`);
+    }
+    shape.setAttribute('fill', color); shape.setAttribute('stroke', 'var(--panel)'); shape.setAttribute('stroke-width', 2);
+    const title = document.createElementNS(ns, 'title'); title.textContent = `${x.label}: ${fmt(String(x.value), true)}(${(frac * 100).toFixed(1)}%)`; shape.append(title);
+    svg.append(shape);
+    const y = 20 + i * 26;
+    const sw = document.createElementNS(ns, 'rect'); sw.setAttribute('x', legendX); sw.setAttribute('y', y - 11); sw.setAttribute('width', 14); sw.setAttribute('height', 14); sw.setAttribute('rx', 3); sw.setAttribute('fill', color);
+    const lab = document.createElementNS(ns, 'text'); lab.setAttribute('x', legendX + 22); lab.setAttribute('y', y); lab.textContent = `${x.label}  ${(frac * 100).toFixed(1)}%(${fmt(String(x.value), true)})`;
+    svg.append(sw, lab);
+    a0 = a1;
+  });
+  return svg;
+}
+
+function fillSelect(sel, cols, { numericOnly = false, blank = false } = {}) {
+  sel.innerHTML = '';
+  if (blank) sel.append(el('option', { value: '' }, '(なし)'));
+  for (const c of cols) if (!numericOnly || c.dtype === 'int' || c.dtype === 'float') sel.append(el('option', { value: c.name }, `${c.name} (${c.dtype})`));
+}
+
+async function refresh(select) {
+  const d = await gql('{ datasets { name rows columns { name dtype nulls } } }');
+  const ds = $('ds'); ds.innerHTML = '';
+  for (const x of d.datasets) ds.append(el('option', { value: x.name }, `${x.name}(${x.rows}行)`));
+  if (select) ds.value = select;
+  onDataset(d.datasets);
+}
+function onDataset(list) {
+  current = (list || []).find(x => x.name === $('ds').value) || null;
+  window._list = list;
+  if (!current) { $('dsinfo').textContent = 'データセットがありません。まず読み込んでください。'; return; }
+  $('dsinfo').textContent = `${current.rows}行 × ${current.columns.length}列 ・ ` + current.columns.map(c => `${c.name}:${c.dtype}${c.nulls ? `(欠損${c.nulls})` : ''}`).join(', ');
+  fillSelect($('fillCol'), current.columns, { blank: true });
+  fillSelect($('sortBy'), current.columns, { blank: true });
+  fillSelect($('gKey'), current.columns);
+  fillSelect($('rTarget'), current.columns, { numericOnly: true });
+  fillSelect($('rFeatures'), current.columns, { numericOnly: true });
+  $('aggs').innerHTML = ''; addAgg();
+}
+function addAgg() {
+  if (!current) return;
+  const row = el('div'); const col = el('select'); fillSelect(col, current.columns);
+  const fn = el('select'); ['SUM', 'MEAN', 'COUNT', 'MIN', 'MAX', 'MEDIAN', 'STD'].forEach(f => fn.append(el('option', { value: f }, f.toLowerCase())));
+  const num = current.columns.find(c => c.dtype === 'int' || c.dtype === 'float'); if (num) col.value = num.name;
+  row.append(col, fn); $('aggs').append(row);
+}
+
+$('file').addEventListener('change', async () => {
+  const f = $('file').files[0]; if (!f) return;
+  $('csv').value = await f.text();
+  $('dsname').value = f.name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || 'data';
+});
+$('load').onclick = async () => {
+  try {
+    const d = await gql('mutation($n:String!,$c:String!){ loadCsv(name:$n, csv:$c){ name rows } }', { n: $('dsname').value, c: $('csv').value });
+    $('loadmsg').textContent = `${d.loadCsv.name} を読み込みました(${d.loadCsv.rows}行)`;
+    await refresh(d.loadCsv.name); $('doPreview').click();
+  } catch (e) { $('loadmsg').textContent = ''; showError(e); }
+};
+const SAMPLE = `date,city,category,sales,qty,ad_cost
+2026-09-01,Tokyo,Audio,120000,12,30000
+2026-09-01,Osaka,Audio,80000,8,20000
+2026-09-02,Tokyo,Video,,5,15000
+2026-09-02,Fukuoka,Audio,45000,4,10000
+2026-09-03,Tokyo,Audio,150000,15,40000
+2026-09-03,Osaka,Video,60000,6,NA
+2026-09-04,Fukuoka,Video,30000,3,8000
+2026-09-04,Tokyo,Video,90000,9,25000
+2026-09-04,Tokyo,Video,90000,9,25000
+2026-09-05,Osaka,Audio,110000,11,32000
+`;
+$('sample').onclick = () => { $('csv').value = SAMPLE; $('dsname').value = 'sample_sales'; $('load').click(); };
+$('ds').onchange = () => onDataset(window._list);
+document.querySelectorAll('[role=tab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[role=tab]').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== b.dataset.tab);
+  $('out').innerHTML = '';
+});
+$('doPreview').onclick = async () => { try { renderTable((await gql('query($n:String!){ preview(name:$n, limit:100){ columns dtypes rows totalRows } }', { n: current?.name ?? '' })).preview); } catch (e) { showError(e); } };
+$('doDescribe').onclick = async () => { try { renderTable((await gql('query($n:String!){ describe(name:$n){ columns dtypes rows totalRows } }', { n: current?.name ?? '' })).describe); } catch (e) { showError(e); } };
+$('addAgg').onclick = addAgg;
+$('doGroup').onclick = async () => {
+  try {
+    const aggs = [...$('aggs').children].map(r => ({ column: r.children[0].value, func: r.children[1].value }));
+    const t = (await gql('query($n:String!,$k:String!,$a:[AggInput!]!){ groupBy(name:$n, key:$k, aggs:$a){ columns dtypes rows totalRows } }', { n: current?.name ?? '', k: $('gKey').value, a: aggs })).groupBy;
+    renderTable(t);
+    const kind = $('chartType').value;
+    const c = kind === 'bar' ? barChart(t) : kind === 'pie' ? pieChart(t) : null;
+    if (c) $('out').append(c);
+  } catch (e) { showError(e); }
+};
+$('doCleanse').onclick = async () => {
+  try {
+    const steps = { dedup: $('dedup').checked, dropNulls: $('dropNulls').checked, filters: $('filters').value.split('\n').map(s => s.trim()).filter(Boolean), descending: $('desc').checked };
+    if ($('fillCol').value && $('fillHow').value) steps.fills = [{ column: $('fillCol').value, method: $('fillHow').value, value: $('fillVal').value }];
+    if ($('sortBy').value) steps.sortBy = $('sortBy').value;
+    const d = await gql('mutation($s:String!,$i:String!,$t:TransformInput!){ transform(source:$s, into:$i, steps:$t){ name rows } }', { s: current?.name ?? '', i: $('into').value, t: steps });
+    await refresh(d.transform.name); $('doPreview').click();
+  } catch (e) { showError(e); }
+};
+$('doRegress').onclick = async () => {
+  try {
+    const feats = [...$('rFeatures').selectedOptions].map(o => o.value);
+    const r = (await gql('query($n:String!,$t:String!,$f:[String!]!){ regression(name:$n, target:$t, features:$f){ target features intercept coefficients rSquared n device } }', { n: current?.name ?? '', t: $('rTarget').value, f: feats })).regression;
+    const terms = r.features.map((f, i) => `${r.coefficients[i] >= 0 ? '+' : '−'} ${Math.abs(r.coefficients[i]).toPrecision(6)} × ${f}`).join(' ');
+    $('out').innerHTML = '';
+    $('out').append(el('p', {}, `${r.target} = ${r.intercept.toPrecision(6)} ${terms}`), el('p', { className: 'meta' }, `決定係数 R² = ${r.rSquared.toFixed(4)} ・ 使用行数 ${r.n} ・ 計算デバイス ${r.device}`));
+  } catch (e) { showError(e); }
+};
+gql('{ computeDevice }').then(d => $('device').textContent = '計算デバイス: ' + d.computeDevice).catch(() => {});
+refresh().catch(showError);
+</script>
+</body>
+</html>

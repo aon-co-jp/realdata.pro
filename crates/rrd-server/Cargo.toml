@@ -1,0 +1,24 @@
+[package]
+name = "rrd-server"
+description = "rs-real-data サーバー: RPoem(open-runo-poem-compat)上で GraphQL 単一エンドポイントと Web UI を提供する"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rrd-server"
+path = "src/main.rs"
+
+[dependencies]
+rrd-core = { path = "../rrd-core" }
+rrd-compute = { path = "../rrd-compute" }
+# RPoem は deps.lock でコミット固定し .deps/ に取得したものを使う(scripts/fetch-deps)。
+open-runo-poem-compat = { path = "../../.deps/RPoem/crates/open-runo-poem-compat" }
+async-graphql = "7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+http-body-util = "0.1"
+bytes = "1"

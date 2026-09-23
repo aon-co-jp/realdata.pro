@@ -1,0 +1,14 @@
+# rs-real-data が依存する aon-co-jp エコシステムの兄弟リポジトリ(コミット固定)。
+#
+# 設計思想: ビルドはユーザーの作業ツリー(F:\ 直下の各リポジトリ)を一切参照・変更しない。
+# scripts/fetch-deps.{sh,ps1} がここに書かれたコミットを .deps/<名前> に取得し、
+# Cargo.toml のパス依存はすべて .deps/ を指す。更新はこのファイルの rev を書き換えて
+# fetch-deps を再実行し、テストが通ることを確認してからコミットする。
+#
+# 名前 URL コミット
+RPoem           https://github.com/aon-co-jp/RPoem.git           e66d7dadb2435e8187e805841e5560f2a07fa2f3
+open-cuda       https://github.com/aon-co-jp/open-cuda.git       b426dbad55489d63e445b6ff003788c21229c0b5
+open-cpu        https://github.com/aon-co-jp/open-cpu.git        d67cd245ae4664eba45b6824ea1ed1650efdf173
+open-web-server https://github.com/aon-co-jp/open-web-server.git 9081beed497c102610705aa1d885f6443f93289a
+open-raid-z     https://github.com/aon-co-jp/open-raid-z.git     422a03e043a9582dd3fd124e0b76a97e70b82af9
+RS-SmartTCP     https://github.com/aon-co-jp/RS-SmartTCP.git     16caba7781b943ee67c0db1da476ba034dc5994a

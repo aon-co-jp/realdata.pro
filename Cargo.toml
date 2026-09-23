@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/rrd-core", "crates/rrd-cli"]
+members = ["crates/rrd-core", "crates/rrd-compute", "crates/rrd-server", "crates/rrd-cli"]
+# .deps/ は deps.lock で固定した兄弟リポジトリ(それぞれ独自の workspace を持つ)。
+exclude = [".deps"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,16 @@
+[package]
+name = "rrd-compute"
+description = "rs-real-data 計算層: open-cuda(opencuda-blas GEMM)で重回帰などの行列演算を実行する"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rrd-core = { path = "../rrd-core" }
+# open-cuda は deps.lock でコミット固定し .deps/ に取得したものを使う(scripts/fetch-deps)。
+opencuda-core = { path = "../../.deps/open-cuda/crates/opencuda-core" }
+opencuda-cpu = { path = "../../.deps/open-cuda/crates/opencuda-cpu" }
+opencuda-blas = { path = "../../.deps/open-cuda/crates/opencuda-blas" }
+anyhow = "1"

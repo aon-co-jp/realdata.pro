@@ -1,76 +1,80 @@
 # rs-real-data
 
-**Rust製・オープンソースのインメモリ分析プラットフォーム**(SAS Viyaの主要な考え方を参考にした自由実装)。
-公式サイト(予定): https://realdata.pro
+**誰でも使える、Rust製・オープンソースのデータ分析プラットフォーム**(SAS Viyaの考え方を参考にした自由実装)。
+大企業にも、中小企業にも、これから起業する人にも。CSVをドラッグするだけで、クレンジング・集計・予測まで。
+
+公式サイト(準備中): https://realdata.pro
 
 > SAS / SAS Viya は SAS Institute Inc. の商標です。本プロジェクトは SAS Institute とは無関係で、
 > 同社のコード・API・仕様を複製するものではありません。機能の方向性のみを参考にしています。
 
-## 目指すもの
+## aon-co-jp エコシステムで構成
 
-| SAS Viyaの特徴 | rs-real-data での対応 | 状態 |
+| 役割 | 使うもの | 状態 |
 |---|---|---|
-| インメモリ分散処理エンジン(CAS) | 列指向インメモリ DataFrame (`rrd-core`) | ✅ 単一ノード版 |
-| データの準備・クレンジング | 欠損補完・欠損行/重複行の除去・フィルタ・並べ替え・列選択 | ✅ |
-| 探索的データ分析 | `describe`(件数・欠損数・平均・標準偏差・四分位・最小/最大)・相関 | ✅ |
-| 集計 | group by + count/sum/mean/min/max/median/std | ✅ |
-| 予測・機械学習 | 単回帰 | ✅ 最小限(重回帰・決定木等は今後) |
-| ノーコード/ローコードのGUI | Web UI | 🔜 計画中 |
-| Python / R 連携 | PyO3 バインディング(Python)・R バインディング | 🔜 計画中 |
-| クラウド/オンプレ両対応 | 単一バイナリ・依存クレートなし | ✅(分散化は今後) |
+| 分析エンジン(列指向インメモリ DataFrame) | `rrd-core`(本リポジトリ、外部依存なし) | ✅ |
+| 行列演算(重回帰など) | [open-cuda](https://github.com/aon-co-jp/open-cuda) `opencuda-blas` の GEMM | ✅ CPU バックエンドで実働 |
+| Web サーバー・API | [RPoem](https://github.com/aon-co-jp/RPoem) `open-runo-poem-compat` + GraphQL 単一エンドポイント | ✅ |
+| ネットワーク基盤 | [open-web-server](https://github.com/aon-co-jp/open-web-server)(RPoem 経由で組込み)、本番の前段ゲートウェイ | ✅ 組込み / 🔜 realdata.pro 前段 |
+| データの永続化・版管理 | [aruaru-db](https://github.com/aon-co-jp/aruaru-db)(Git-on-SQL、`AS OF COMMIT` で過去の分析を再現) | 🔜 次段 |
+| AI による分析の説明・提案 | [aruaru-llm](https://github.com/aon-co-jp/aruaru-llm) | 🔜 次段 |
+| グラフ描画 | 棒グラフ・円グラフ(ブラウザ SVG)/ GPU 描画は [open-directx](https://github.com/aon-co-jp/open-directx) | ✅ 棒・円 / 🔜 GPU |
 
-詳細な設計と今後の計画は [PORTING.md](PORTING.md) を参照。
+## SAS Viya の特徴との対応
+
+| SAS Viyaの特徴 | rs-real-data | 状態 |
+|---|---|---|
+| インメモリ分散処理エンジン(CAS) | 列指向 DataFrame + open-cuda | ✅ 単一ノード |
+| データ準備・クレンジング | 欠損補完・欠損行/重複行除去・フィルタ・並べ替え・列選択 | ✅ |
+| 探索的データ分析 | 要約統計(四分位など)・相関 | ✅ |
+| 集計 | group by(count/sum/mean/min/max/median/std) | ✅ |
+| 予測・機械学習 | 重回帰(open-cuda GEMM) | ✅ 最初の一歩 |
+| ノーコード GUI | Web UI(ファイル選択だけで使える) | ✅ |
+| Python / R 連携 | GraphQL で任意の言語から / 専用バインディング | ✅ GraphQL / 🔜 専用 |
+
+## すぐ試す
+
+```bash
+# 1. エコシステムの依存をコミット固定で .deps/ に取得(作業ツリーには触れない)
+bash scripts/fetch-deps.sh          # Windows: powershell -File scripts\fetch-deps.ps1
+# 2. サーバー起動 → ブラウザで http://127.0.0.1:4701/
+cargo run --release -p rrd-server
+```
+
+コマンドラインだけで使う場合:
+
+```bash
+cargo run --release -p rrd-cli -- describe examples/sales.csv
+cargo run --release -p rrd-cli -- groupby examples/sales.csv city sales:sum qty:mean
+```
+
+GraphQL(`POST /graphql`)の例:
+
+```graphql
+mutation { loadCsv(name: "sales", csv: "city,sales\nTokyo,100\nOsaka,80\n") { rows } }
+query { regression(name: "sales", target: "sales", features: ["qty", "ad_cost"]) { intercept coefficients rSquared device } }
+```
 
 ## 構成
 
 ```
 crates/
-  rrd-core/   コアエンジン(外部依存なし): CSV読込/書出・型推論・DataFrame・統計
-  rrd-cli/    コマンドライン `rrd`
-examples/
-  sales.csv   サンプルデータ
+  rrd-core/     分析エンジン(外部依存なし)
+  rrd-compute/  open-cuda による行列演算
+  rrd-server/   RPoem 上の GraphQL + Web UI
+  rrd-cli/      コマンドライン `rrd`
+deps.lock       依存するエコシステムのリポジトリとコミット
+scripts/        fetch-deps(.deps/ への固定取得)
 ```
 
-## 使い方
-
-```bash
-cargo build --release
-rrd describe examples/sales.csv
-rrd query examples/sales.csv --dedup --fill sales:mean --filter "sales>=60000" --sort sales:desc
-rrd groupby examples/sales.csv city sales:sum sales:count qty:mean
-rrd corr examples/sales.csv qty sales
-rrd regress examples/sales.csv ad_cost sales
-```
-
-出力例(`groupby`):
-
-```
-| city    | sales_sum | sales_count | qty_mean |
-|---------|-----------|-------------|----------|
-| Tokyo   | 450000    | 4           | 10       |
-| Osaka   | 250000    | 3           | 8.3333   |
-| Fukuoka | 75000     | 2           | 3.5      |
-```
-
-## ライブラリとして
-
-```rust
-use rrd_core::{csv, Agg, Fill};
-
-let df = csv::read_csv("examples/sales.csv")?
-    .drop_duplicates()
-    .fill_null("sales", &Fill::Mean)?;
-println!("{}", df.group_by("city", &[("sales", Agg::Sum)])?);
-```
+開発では `cargo fmt-own` / `cargo lint-own` / `cargo test-own` を使います(`cargo fmt --all` は依存先まで整形するため使いません)。
 
 ## English
 
-**rs-real-data** is an open-source, in-memory analytics platform written in Rust, inspired by the
-concepts of SAS Viya (not affiliated with SAS Institute). The current release provides a
-dependency-free columnar DataFrame engine (`rrd-core`) with CSV I/O and type inference, data
-cleansing (null filling, dropping nulls/duplicates, filtering, sorting), exploratory statistics
-(`describe`, correlation), group-by aggregation and simple linear regression, plus the `rrd` CLI.
-A web UI, Python/R bindings and distributed execution are planned — see [PORTING.md](PORTING.md).
+**rs-real-data** is an open-source analytics platform in Rust, inspired by SAS Viya (not affiliated with
+SAS Institute), built on the aon-co-jp ecosystem: a dependency-free columnar engine, open-cuda GEMM for
+regression, and a RPoem-based server exposing a single GraphQL endpoint plus a no-code web UI. aruaru-db
+persistence, aruaru-llm explanations and open-directx rendering are next. See [PORTING.md](PORTING.md).
 
 ## ライセンス
 
