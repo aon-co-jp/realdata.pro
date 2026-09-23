@@ -1,0 +1,11 @@
+date,city,category,sales,qty,ad_cost
+2026-09-01,Tokyo,Audio,120000,12,30000
+2026-09-01,Osaka,Audio,80000,8,20000
+2026-09-02,Tokyo,Video,,5,15000
+2026-09-02,Fukuoka,Audio,45000,4,10000
+2026-09-03,Tokyo,Audio,150000,15,40000
+2026-09-03,Osaka,Video,60000,6,NA
+2026-09-04,Fukuoka,Video,30000,3,8000
+2026-09-04,Tokyo,Video,90000,9,25000
+2026-09-04,Tokyo,Video,90000,9,25000
+2026-09-05,Osaka,Audio,110000,11,32000

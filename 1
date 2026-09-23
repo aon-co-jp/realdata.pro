@@ -1,0 +1,17 @@
+エラー: 解析エラー: フィルタ式を解釈できません: nope
+
+使い方:
+  rrd describe <file.csv>                       各列の要約統計
+  rrd head <file.csv> [n]                       先頭n行(既定10)
+  rrd query <file.csv> [オプション...]          クレンジング・抽出
+      --filter <式>        例: "sales>=100" "city==Tokyo"(複数可)
+      --select <a,b,...>   列の選択
+      --drop-nulls         欠損を含む行を削除
+      --dedup              重複行を削除
+      --fill <列>:<mean|median|値>
+      --sort <列>[:desc]
+      --head <n>
+      --csv                表ではなくCSVで出力
+  rrd groupby <file.csv> <キー列> <列:集計>...  集計: count sum mean min max median std
+  rrd corr <file.csv> <列A> <列B>               ピアソン相関
+  rrd regress <file.csv> <x列> <y列>            単回帰 y = a + b x

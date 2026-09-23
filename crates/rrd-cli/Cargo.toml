@@ -1,0 +1,15 @@
+[package]
+name = "rrd-cli"
+description = "rs-real-data コマンドラインツール"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rrd"
+path = "src/main.rs"
+
+[dependencies]
+rrd-core = { path = "../rrd-core" }
