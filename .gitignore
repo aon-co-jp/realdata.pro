@@ -1,2 +1,4 @@
 /target
 /.deps
+/crates/rrd-server/data
+/data

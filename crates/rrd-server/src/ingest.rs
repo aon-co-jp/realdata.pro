@@ -264,6 +264,15 @@ async fn fetch_public(url: &str) -> Result<(reqwest::Url, String, bytes::Bytes)>
     bail!("リダイレクトが多すぎます(上限 {MAX_REDIRECTS} 回)")
 }
 
+/// 公開ページの HTML を取得する(SSRF 対策・サイズ/時間の上限は `fetch_public` と同じ)。
+pub async fn fetch_page_html(url: &str) -> Result<String> {
+    let (_, ctype, body) = fetch_public(url).await?;
+    if !ctype.is_empty() && !ctype.contains("html") && !ctype.contains("text/plain") {
+        bail!("HTML ではありません({ctype})");
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
 /// 調査対象 URL を取り込む。CSV → JSON(オブジェクト配列)→ HTML の表 → HTML のリンク一覧の順に試す。
 pub async fn import_url(url: &str) -> Result<Imported> {
     let (final_url, ctype, body) = fetch_public(url).await?;

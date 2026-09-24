@@ -10,17 +10,19 @@
 //! 環境変数:
 //! - `RRD_BIND`      待受アドレス(既定 127.0.0.1:4701)
 //! - `RRD_MAX_BODY`  リクエストボディ上限バイト数(既定 32MiB)
+//! - `RRD_DATA_DIR`  収集結果の保存先(既定 data)
 //! - `RRD_ARUARU_LLM_URL`  aruaru-llm の URL(既定 http://127.0.0.1:4600、検索取り込みと AI 説明に使う)
 
+mod deposits;
 mod explain;
 mod ingest;
 mod languages;
+mod market;
 mod research;
 mod schema;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use http_body_util::{BodyExt, Limited};
 use open_runo_poem_compat::hyper_compat::{html_response, json_response};
@@ -89,14 +91,15 @@ async fn main() -> std::io::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(32 << 20);
 
-    let state = Arc::new(AppState {
-        datasets: RwLock::new(HashMap::new()),
-        device: rrd_compute::default_device(),
-        http: reqwest::Client::new(),
-        llm_base: std::env::var("RRD_ARUARU_LLM_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:4600".into()),
-    });
+    let state = Arc::new(AppState::new(
+        rrd_compute::default_device(),
+        std::env::var("RRD_ARUARU_LLM_URL").unwrap_or_else(|_| "http://127.0.0.1:4600".into()),
+        std::env::var("RRD_DATA_DIR")
+            .unwrap_or_else(|_| "data".into())
+            .into(),
+    ));
     println!("realdata.pro: 計算デバイス = {}", state.device.info().name);
+    tokio::spawn(schedule(state.clone()));
     let schema = build_schema(state);
 
     let (addr, handle) = Server::new(TcpListener::bind(bind))
@@ -108,4 +111,28 @@ async fn main() -> std::io::Result<()> {
         _ = tokio::signal::ctrl_c() => println!("realdata.pro: 終了します"),
     }
     Ok(())
+}
+
+/// 定期実行: 市場データは起動時と 3 時間ごと、外貨定期預金の金利は毎朝 7 時(日本時間)に1回。
+async fn schedule(state: Arc<AppState>) {
+    schema::refresh_market(&state).await;
+    let mut last_market = market::now_unix();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        let now = market::now_unix();
+        if now.saturating_sub(last_market) >= 3 * 3600 {
+            schema::refresh_market(&state).await;
+            last_market = now;
+        }
+        let (y, m, d, hour) = market::jst(now);
+        let last = state
+            .deposits
+            .read()
+            .map(|s| s.collected_at_unix)
+            .unwrap_or(0);
+        let (ly, lm, ld, _) = market::jst(last);
+        if hour >= 7 && (last == 0 || (ly, lm, ld) != (y, m, d)) {
+            tokio::spawn(schema::run_deposit_collection(state.clone()));
+        }
+    }
 }

@@ -55,12 +55,77 @@ button:disabled{opacity:.5;cursor:progress}
 .prio.high{border-color:#c62f2f;color:#c62f2f}
 .prio.medium{border-color:#c9a227;color:#a07f10}
 .warn{color:var(--muted);font-size:13px}
+.sample-banner{border:2px solid #c9a227;background:color-mix(in srgb,#c9a227 12%,var(--panel));border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:14px}
+.badge{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:999px;border:1px solid #c9a227;color:#a07f10;vertical-align:middle}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:10px 0}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.kpi b{display:block;font-size:20px}
+.scroll{overflow-x:auto}
 .charts2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;align-items:start}
 </style>
 </head>
 <body>
 <header><h1>realdata.pro</h1><small>Rust製インメモリ分析 · RPoem + open-cuda · <span id="device">…</span></small></header>
 <main>
+  <section id="bizsvc">
+    <div class="sample-banner" role="note">
+      <strong>このサービスの画面はサンプル(模擬)です。</strong>実際の融資・審査・信用調査・申込みの受付は行っていません。入力した内容はこの端末の外へ送信・保存されません。<br>
+      <strong lang="en">These service screens are SAMPLES (simulations).</strong> <span lang="en">No actual loans, screening, credit checks or applications are processed. Nothing you enter leaves this device or is stored.</span>
+    </div>
+    <h2>🏦 起業・企業向けサービス <span class="badge">サンプル / Sample</span></h2>
+    <div class="tabs" role="tablist" aria-label="起業・企業向けサービス">
+      <button role="tab" data-biz="loan" aria-selected="true">融資のお申込み(模擬)</button>
+      <button role="tab" data-biz="credit">信用調査・与信(模擬)</button>
+      <button role="tab" data-biz="collect">債権回収状況(サンプル)</button>
+      <button role="tab" data-biz="estate">不動産投資情報(サンプル)</button>
+    </div>
+    <div data-bizpanel="loan">
+      <p class="meta">入力すると、画面上で模擬的な審査結果を表示します(計算はこの端末内だけで行い、どこにも送信しません)。</p>
+      <div class="row">
+        <div><label for="lnType">事業形態</label><select id="lnType"><option value="corp">法人</option><option value="sole">個人事業主</option><option value="startup">これから起業</option></select></div>
+        <div><label for="lnYears">事業年数(年)</label><input id="lnYears" type="text" inputmode="decimal" value="3"></div>
+        <div><label for="lnSales">年商(万円)</label><input id="lnSales" type="text" inputmode="decimal" value="3000"></div>
+        <div><label for="lnProfit">経常利益(万円)</label><input id="lnProfit" type="text" inputmode="decimal" value="200"></div>
+      </div>
+      <div class="row">
+        <div><label for="lnAmount">希望額(万円)</label><input id="lnAmount" type="text" inputmode="decimal" value="500"></div>
+        <div><label for="lnTerm">返済期間(年)</label><select id="lnTerm"><option>1</option><option>3</option><option selected>5</option><option>7</option><option>10</option></select></div>
+        <div><label for="lnCollat">担保・保証</label><select id="lnCollat"><option value="realestate">不動産担保</option><option value="deposit">預金担保</option><option value="guarantor">保証人</option><option value="none" selected>なし</option></select></div>
+        <div><label for="lnDelay">過去の延滞</label><select id="lnDelay"><option value="0">なし</option><option value="1">あり</option></select></div>
+      </div>
+      <button id="doLoan">模擬審査する</button>
+      <div id="loanOut"></div>
+    </div>
+    <div data-bizpanel="credit" hidden><p class="meta">架空の企業による信用調査・与信判断の表示例です。実在の企業・人物とは関係ありません。</p><div id="creditOut" class="cards"></div></div>
+    <div data-bizpanel="collect" hidden><p class="meta">架空の貸付先による債権回収状況の表示例です。</p><div id="collectOut"></div></div>
+    <div data-bizpanel="estate" hidden><p class="meta">架空の物件による不動産投資情報の表示例です(国土交通省「不動産情報ライブラリ」との連携は準備中)。</p><div id="estateOut"></div></div>
+  </section>
+
+  <section id="invest">
+    <h2>📈 資金運用・投資の参考情報</h2>
+    <p class="meta">公的機関が公表しているデータ(日次)です。<strong>投資助言ではありません。</strong>投資の判断はご自身の責任で行ってください。/ <span lang="en">Public data published daily. Not investment advice.</span></p>
+    <div class="tabs" role="tablist" aria-label="投資情報">
+      <button role="tab" data-inv="policy" aria-selected="true">世界の政策金利</button>
+      <button role="tab" data-inv="bonds">国債利回り</button>
+      <button role="tab" data-inv="fx">為替レート</button>
+      <button role="tab" data-inv="deposit">外貨定期預金の金利</button>
+    </div>
+    <div id="invOut"><p class="meta">読み込み中…</p></div>
+  </section>
+
+  <section id="jobs">
+    <h2>💼 仕事・研修 <span class="meta" lang="en">Jobs &amp; Training</span></h2>
+    <div class="cards">
+      <div class="card"><h4>無料の IT 研修</h4><p class="meta">Free IT training</p><p><span class="badge">準備中 / Coming soon</span></p></div>
+      <div class="card"><h4>無料の転職エージェント</h4><p class="meta">Free career agent</p><p><span class="badge">準備中 / Coming soon</span></p></div>
+      <div class="card"><h4>正社員・アルバイト・フリーランス案件</h4><p class="meta">Full-time, part-time &amp; freelance jobs</p><p><a href="https://audiocafe.tokyo/aruaru/" target="_blank" rel="noopener">求人情報(日本語)</a> · <a href="https://audiocafe.tokyo/aruaru/index-en.php" target="_blank" rel="noopener" lang="en">English</a></p></div>
+      <div class="card"><h4>TV チャットレディ・キャバレー・キャバクラ求人</h4><p class="meta">Night-work jobs (18+)</p>
+        <p><a href="https://audiocafe.tokyo/aruaru-lady/" target="_blank" rel="noopener">求人情報(日本語)</a> · <a href="https://audiocafe.tokyo/aruaru-lady/index-en.php" target="_blank" rel="noopener" lang="en">English</a></p>
+        <p><a href="https://audiocafe.tokyo/ranking/aruaru-caba" target="_blank" rel="noopener">キャバクラ ランキング</a> · <a href="https://audiocafe.tokyo/ranking/aruaru-jukujo-caba" target="_blank" rel="noopener">熟女キャバクラ ランキング</a></p>
+        <p class="warn">18歳未満の方はご応募いただけません。/ <span lang="en">Applicants must be 18 or older.</span></p></div>
+    </div>
+  </section>
+
   <section id="research">
     <h2>🌍 世界リサーチ(テーマから情報収集 → 解析 → 提案)</h2>
     <p class="meta">調べたいテーマと国・地域を選ぶだけで、各国の現地語で Web とニュースを集め、AI(aruaru-llm の無料 AI)がトレンド・機会・リスク・具体的な提案をまとめます。</p>
@@ -598,6 +663,134 @@ $('doRegress').onclick = async () => {
 };
 gql('{ computeDevice }').then(d => $('device').textContent = '計算デバイス: ' + d.computeDevice).catch(() => {});
 refresh().catch(showError);
+
+// ───── 起業・企業向けサービス(サンプル)─────
+// 入力はこの端末内だけで計算し、サーバーへは一切送らない(fetch を使わない)。
+function simpleTable(columns, rows, numericCols = []) {
+  const wrap = el('div', { className: 'scroll' }); const table = el('table'); const tr = el('tr');
+  columns.forEach(c => tr.append(el('th', {}, c))); const thead = el('thead'); thead.append(tr); table.append(thead);
+  const tb = el('tbody');
+  for (const r of rows) { const row = el('tr'); r.forEach((v, i) => { const td = el('td', { className: numericCols.includes(i) ? 'num' : '' }); if (v instanceof Node) td.append(v); else td.textContent = v; row.append(td); }); tb.append(row); }
+  table.append(tb); wrap.append(table); return wrap;
+}
+const yen = (man) => `${Math.round(man).toLocaleString()} 万円`;
+document.querySelectorAll('[data-biz]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-biz]').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('[data-bizpanel]').forEach(p => p.hidden = p.dataset.bizpanel !== b.dataset.biz);
+});
+$('doLoan').onclick = () => {
+  const out = $('loanOut'); out.innerHTML = '';
+  const num = (id) => Number(String($(id).value).replace(/[,，\s]/g, ''));
+  const years = num('lnYears'), sales = num('lnSales'), profit = num('lnProfit'), amount = num('lnAmount'), term = Number($('lnTerm').value);
+  if (![years, sales, profit, amount].every(Number.isFinite) || years < 0 || sales < 0 || amount <= 0) { out.append(el('p', { className: 'err' }, '数値を正しく入力してください(希望額は 0 より大きい値)')); return; }
+  let score = 50; const notes = [];
+  const t = $('lnType').value; score += t === 'corp' ? 10 : t === 'startup' ? -15 : 0; if (t === 'startup') notes.push('創業前のため、事業計画書の内容が重視されます(模擬)');
+  score += Math.min(years, 10) * 2;
+  const margin = sales > 0 ? profit / sales : 0;
+  if (margin >= 0.05) score += 20; else if (margin > 0) score += 10; else { score -= 15; notes.push('利益がマイナスです'); }
+  const ratio = sales > 0 ? amount / sales : 9;
+  if (ratio > 0.5) { score -= 20; notes.push('希望額が年商に比べて大きめです'); } else if (ratio > 0.3) score -= 10; else if (ratio < 0.1) score += 5;
+  score += { realestate: 15, deposit: 20, guarantor: 8, none: 0 }[$('lnCollat').value];
+  if ($('lnDelay').value === '1') { score -= 25; notes.push('過去の延滞が審査に影響します'); }
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const grade = score >= 75 ? ['A', '承認見込み'] : score >= 60 ? ['B', '条件付きで承認見込み'] : score >= 45 ? ['C', '要相談'] : ['D', '見送りの可能性が高い'];
+  const rate = Math.min(15, 2 + (100 - score) * 0.12);
+  const r = rate / 100 / 12, n = term * 12, P = amount * 10000;
+  const monthly = r > 0 ? P * r / (1 - Math.pow(1 + r, -n)) : P / n;
+  const limit = Math.max(0, sales * 0.3 * (score / 100));
+  const kpis = el('div', { className: 'kpis' });
+  for (const [k, v] of [['模擬スコア', `${score} / 100`], ['判定(模擬)', `${grade[0]}:${grade[1]}`], ['想定金利(サンプル)', `年 ${rate.toFixed(2)}%`], ['毎月の返済額(元利均等)', `${Math.round(monthly).toLocaleString()} 円`], ['融資可能額の目安(模擬)', yen(limit)]]) { const d = el('div', { className: 'kpi' }); d.append(el('span', { className: 'meta' }, k), el('b', {}, v)); kpis.append(d); }
+  out.append(el('p', { className: 'sample-banner' }, 'これは模擬審査です。実際の融資・審査・申込みは行っていません。/ This is a simulated screening only. No actual loan application is made.'), kpis);
+  if (notes.length) { const ul = el('ul', { className: 'meta' }); notes.forEach(n => ul.append(el('li', {}, n))); out.append(ul); }
+};
+(function renderBizSamples() {
+  const credit = [
+    { name: '株式会社サンプル商事(架空)', kind: '法人・卸売業', score: 78, limit: 3000, rec: '取引推奨', factors: ['設立15年・増収基調', '自己資本比率 42%', '支払遅延なし'] },
+    { name: '合同会社テスト物流(架空)', kind: '法人・運送業', score: 61, limit: 800, rec: '条件付き(前払いまたは保証)', factors: ['設立4年', '燃料費高騰で減益', '支払遅延 1回(軽微)'] },
+    { name: '山田デザイン事務所(架空)', kind: '個人事業主・デザイン', score: 52, limit: 150, rec: '少額から取引', factors: ['開業2年', '売上の7割が1社に集中', '確定申告2期分を確認'] },
+  ];
+  for (const c of credit) {
+    const card = el('div', { className: 'card' }); card.append(el('h4', {}, c.name), el('p', { className: 'meta' }, c.kind));
+    const k = el('div', { className: 'kpis' }); for (const [a, b] of [['信用スコア', `${c.score} / 100`], ['与信限度額', yen(c.limit)], ['判断', c.rec]]) { const d = el('div', { className: 'kpi' }); d.append(el('span', { className: 'meta' }, a), el('b', {}, b)); k.append(d); }
+    const ul = el('ul', { className: 'meta' }); c.factors.forEach(f => ul.append(el('li', {}, f))); card.append(k, ul); $('creditOut').append(card);
+  }
+  const loans = [
+    ['A社(架空)', 1200, 820, '正常'], ['B社(架空)', 500, 0, '完済'], ['C社(架空)', 800, 640, '正常'], ['D商店(架空)', 300, 280, '延滞30日'],
+    ['E社(架空)', 1500, 1320, '正常'], ['F工房(架空)', 200, 190, '延滞90日以上'], ['G社(架空)', 600, 410, '回収中'], ['H社(架空)', 1000, 0, '完済'],
+  ];
+  const total = loans.reduce((s, l) => s + l[1], 0), remain = loans.reduce((s, l) => s + l[2], 0);
+  const overdue = loans.filter(l => l[3].startsWith('延滞') || l[3] === '回収中').reduce((s, l) => s + l[2], 0);
+  const k = el('div', { className: 'kpis' });
+  for (const [a, b] of [['総貸付額', yen(total)], ['回収済み', `${yen(total - remain)}(${((total - remain) / total * 100).toFixed(1)}%)`], ['残高', yen(remain)], ['延滞・回収中の残高', `${yen(overdue)}(残高の ${(overdue / remain * 100).toFixed(1)}%)`]]) { const d = el('div', { className: 'kpi' }); d.append(el('span', { className: 'meta' }, a), el('b', {}, b)); k.append(d); }
+  const byStatus = {}; loans.forEach(l => byStatus[l[3]] = (byStatus[l[3]] || 0) + 1);
+  const pie = pieChart({ columns: ['状態', '件数'], dtypes: ['str', 'int'], rows: Object.entries(byStatus).map(([s, n]) => [s, String(n)]) });
+  $('collectOut').append(k, simpleTable(['貸付先', '貸付額', '残高', '状態', '回収率'], loans.map(l => [l[0], yen(l[1]), yen(l[2]), l[3], `${((l[1] - l[2]) / l[1] * 100).toFixed(0)}%`]), [1, 2, 4]));
+  if (pie) $('collectOut').append(pie);
+  const estates = [
+    ['区分マンション(架空)', '東京都(架空)', 2800, 138, 12], ['一棟アパート(架空)', '福岡県(架空)', 7500, 610, 18], ['戸建て(架空)', '大阪府(架空)', 1600, 132, 25], ['店舗(架空)', '愛知県(架空)', 4200, 336, 20],
+  ];
+  $('estateOut').append(simpleTable(['物件', '所在地', '価格', '年間賃料', '表面利回り', '築年数'], estates.map(e => [e[0], e[1], yen(e[2]), yen(e[3]), `${(e[3] / e[2] * 100).toFixed(2)}%`, `${e[4]}年`]), [2, 3, 4, 5]));
+})();
+
+// ───── 資金運用・投資の参考情報(公的データ)─────
+const AREA_JA = { AR: 'アルゼンチン', AT: 'オーストリア', AU: 'オーストラリア', BE: 'ベルギー', BR: 'ブラジル', CA: 'カナダ', CH: 'スイス', CL: 'チリ', CN: '中国', CO: 'コロンビア', CZ: 'チェコ', DE: 'ドイツ', DK: 'デンマーク', ES: 'スペイン', FR: 'フランス', GB: 'イギリス', GR: 'ギリシャ', HK: '香港', HR: 'クロアチア', HU: 'ハンガリー', ID: 'インドネシア', IL: 'イスラエル', IN: 'インド', IS: 'アイスランド', IT: 'イタリア', JP: '日本', KR: '韓国', KW: 'クウェート', MA: 'モロッコ', MK: '北マケドニア', MX: 'メキシコ', MY: 'マレーシア', NL: 'オランダ', NO: 'ノルウェー', NZ: 'ニュージーランド', PE: 'ペルー', PH: 'フィリピン', PL: 'ポーランド', PT: 'ポルトガル', RO: 'ルーマニア', RS: 'セルビア', RU: 'ロシア', SA: 'サウジアラビア', SE: 'スウェーデン', TH: 'タイ', TR: 'トルコ', US: 'アメリカ', XM: 'ユーロ圏', ZA: '南アフリカ', EU: 'ユーロ圏(AAA)' };
+const CUR_JA = { USD: '米ドル', EUR: 'ユーロ', AUD: '豪ドル', GBP: '英ポンド', NZD: 'NZドル', CAD: 'カナダドル', ZAR: '南アフリカランド', MXN: 'メキシコペソ', CNY: '人民元', CHF: 'スイスフラン', KRW: '韓国ウォン', INR: 'インドルピー', BRL: 'ブラジルレアル', TRY: 'トルコリラ', SGD: 'シンガポールドル', HKD: '香港ドル' };
+let marketData = null, invTab = 'policy', depositCur = 'USD';
+const fmtTime = (unix) => unix ? new Date(unix * 1000).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '—';
+function renderInvest() {
+  const out = $('invOut'); out.innerHTML = '';
+  if (!marketData) { out.append(el('p', { className: 'meta' }, '読み込み中…')); return; }
+  const m = marketData.market;
+  const errs = invTab === 'deposit' ? [] : m.errors;
+  for (const e of errs) out.append(el('p', { className: 'warn' }, '⚠ 取得できなかった情報源: ' + e));
+  if (invTab === 'policy') {
+    const rows = [...m.policyRates].sort((a, b) => b.rate - a.rate);
+    out.append(el('p', { className: 'meta' }, `出典: BIS(国際決済銀行)各国中央銀行の政策金利 ・ 更新 ${fmtTime(m.updatedAtUnix)}`));
+    const chart = barChart({ columns: ['国・地域', '政策金利(%)'], dtypes: ['str', 'float'], rows: rows.filter(r => r.rate >= 0).slice(0, 15).map(r => [AREA_JA[r.area] || r.area, String(r.rate)]) });
+    if (chart) { out.append(el('h4', {}, '政策金利の高い国・地域(上位15)')); out.append(chart); }
+    out.append(simpleTable(['国・地域', '政策金利', '基準日'], rows.map(r => [AREA_JA[r.area] || r.area, `${r.rate.toFixed(2)}%`, r.date]), [1]));
+  } else if (invTab === 'bonds') {
+    out.append(el('p', { className: 'meta' }, `出典: 財務省(日本)・米国財務省・ECB(ユーロ圏 AAA 国債) ・ 更新 ${fmtTime(m.updatedAtUnix)}`));
+    const tenors = ['2Y', '5Y', '10Y', '30Y'], countries = [...new Set(m.bondYields.map(b => b.country))];
+    out.append(simpleTable(['国・地域', '2年', '5年', '10年', '30年', '基準日', '出典'], countries.map(c => { const bs = m.bondYields.filter(b => b.country === c); return [AREA_JA[c] || c, ...tenors.map(t => { const b = bs.find(x => x.tenor === t); return b ? `${b.yieldPct.toFixed(3)}%` : '—'; }), bs[0]?.date || '', bs[0]?.source || '']; }), [1, 2, 3, 4]));
+  } else if (invTab === 'fx') {
+    const major = ['USD', 'EUR', 'GBP', 'AUD', 'CAD', 'CHF', 'CNY', 'NZD', 'KRW', 'INR', 'SGD', 'HKD', 'BRL', 'ZAR', 'MXN', 'TRY'];
+    const rows = [...m.fxRates].sort((a, b) => (major.indexOf(a.currency) + 1 || 99) - (major.indexOf(b.currency) + 1 || 99));
+    out.append(el('p', { className: 'meta' }, `出典: ECB(欧州中央銀行)参照レートから円換算 ・ 基準日 ${rows[0]?.date || '—'}`));
+    out.append(simpleTable(['通貨', '1 単位あたりの円'], rows.map(r => [`${CUR_JA[r.currency] || ''} ${r.currency}`.trim(), `${r.jpyPerUnit.toLocaleString(undefined, { maximumFractionDigits: 4 })} 円`]), [1]));
+  } else {
+    const d = marketData.deposits;
+    out.append(el('p', { className: 'meta' }, '各銀行の公開ページから毎朝7時(日本時間)に自動で収集しています。金利はページに書かれていた値のみを載せています。キャンペーン条件などがあるため、必ず各銀行のサイトで最新の金利をご確認ください。'));
+    out.append(el('p', { className: 'meta' }, `最終収集: ${fmtTime(d.collectedAtUnix)}${marketData.depositsCollecting ? '(ただいま収集中…)' : ''}`));
+    const btn = el('button', { className: 'secondary' }, '今すぐ収集する');
+    btn.onclick = async () => { btn.disabled = true; try { const r = await gql('mutation{ collectDepositRates }'); out.append(el('p', { className: 'meta' }, r.collectDepositRates)); } catch (e) { out.append(el('p', { className: 'err' }, e.message)); } };
+    out.append(btn);
+    if (!d.items.length) out.append(el('p', { className: 'meta' }, d.collectedAtUnix ? '条件に合う金利を読み取れませんでした。' : 'まだ収集されていません。'));
+    else {
+      const curs = [...new Set(d.items.map(x => x.currency))];
+      if (!curs.includes(depositCur)) depositCur = curs[0];
+      const sel = el('select'); sel.setAttribute('aria-label', '通貨'); sel.style.maxWidth = '240px'; sel.style.margin = '10px 0';
+      curs.forEach(c => sel.append(el('option', { value: c, selected: c === depositCur }, `${CUR_JA[c] || ''} ${c}(${d.items.filter(x => x.currency === c).length}件)`)));
+      sel.onchange = () => { depositCur = sel.value; renderInvest(); };
+      out.append(sel);
+      const items = d.items.filter(x => x.currency === depositCur);
+      out.append(simpleTable(['通貨', '銀行', '期間', '年利', '条件', '出典'], items.map(x => [`${CUR_JA[x.currency] || ''} ${x.currency}`.trim(), x.bank, x.term || '—', `${x.rate}%`, x.condition || '—', safeLink(x.url, x.pageTitle || x.url)]), [3]));
+    }
+    if (d.errors.length) { const det = el('details'); det.append(el('summary', { className: 'meta' }, `読み取れなかったページ(${d.errors.length}件)`)); const ul = el('ul', { className: 'meta' }); d.errors.forEach(e => ul.append(el('li', {}, e))); det.append(ul); out.append(det); }
+  }
+}
+document.querySelectorAll('[data-inv]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-inv]').forEach(x => x.setAttribute('aria-selected', x === b)); invTab = b.dataset.inv; renderInvest();
+});
+async function loadMarket() {
+  try {
+    marketData = (await gql(`{ market { depositsCollecting
+      market { updatedAtUnix errors policyRates { area rate date } bondYields { country tenor yieldPct date source } fxRates { currency jpyPerUnit date } }
+      deposits { collectedAtUnix errors items { currency bank term rate condition url pageTitle } } } }`)).market;
+  } catch (e) { $('invOut').innerHTML = ''; $('invOut').append(el('p', { className: 'err' }, e.message)); return; }
+  renderInvest();
+}
+loadMarket();
 </script>
 </body>
 </html>

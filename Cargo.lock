@@ -3368,6 +3368,7 @@ dependencies = [
  "async-graphql",
  "base64 0.22.1",
  "bytes",
+ "encoding_rs",
  "futures",
  "http-body-util",
  "open-runo-poem-compat",

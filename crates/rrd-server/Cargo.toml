@@ -29,3 +29,5 @@ futures = "0.3"
 # 調査対象 URL の取得と aruaru-llm 呼び出し(エコシステム既定の rustls、OpenSSL 不要)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 scraper = "0.20"
+# 財務省の国債金利 CSV(Shift_JIS)を読むため
+encoding_rs = "0.8"

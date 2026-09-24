@@ -19,6 +19,63 @@ pub struct AppState {
     /// aruaru-llm への接続(検索の取り込みと、分析結果の説明に使う)。
     pub http: reqwest::Client,
     pub llm_base: String,
+    /// 資金運用・投資の参考情報(公的データ、定期更新)
+    pub market: RwLock<crate::market::MarketSnapshot>,
+    /// 外貨定期預金の金利(毎朝の自動収集)
+    pub deposits: RwLock<crate::deposits::DepositSnapshot>,
+    /// 収集中なら true(重複実行を防ぐ)
+    pub deposits_running: std::sync::atomic::AtomicBool,
+    /// 収集結果などを保存するフォルダ
+    pub data_dir: std::path::PathBuf,
+}
+
+impl AppState {
+    pub fn new(
+        device: Arc<dyn GpuDevice>,
+        llm_base: String,
+        data_dir: std::path::PathBuf,
+    ) -> AppState {
+        AppState {
+            datasets: RwLock::new(HashMap::new()),
+            device,
+            http: reqwest::Client::new(),
+            llm_base,
+            market: RwLock::new(Default::default()),
+            deposits: RwLock::new(crate::deposits::load(&data_dir)),
+            deposits_running: std::sync::atomic::AtomicBool::new(false),
+            data_dir,
+        }
+    }
+}
+
+/// 外貨定期預金の金利を収集して保存する(実行中なら何もしない)。
+pub async fn run_deposit_collection(st: Arc<AppState>) {
+    use std::sync::atomic::Ordering;
+    if st.deposits_running.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let snap = crate::deposits::collect(&st.http, &st.llm_base).await;
+    if let Err(e) = crate::deposits::save(&st.data_dir, &snap) {
+        eprintln!("realdata.pro: 預金金利の保存に失敗: {e:#}");
+    }
+    eprintln!(
+        "realdata.pro: 外貨定期預金の金利を収集しました({}件、エラー{}件)",
+        snap.items.len(),
+        snap.errors.len()
+    );
+    if let Ok(mut d) = st.deposits.write() {
+        *d = snap;
+    }
+    st.deposits_running.store(false, Ordering::SeqCst);
+}
+
+/// 市場データを取得して反映する。
+pub async fn refresh_market(st: &AppState) {
+    let (y, m, _, _) = crate::market::jst(crate::market::now_unix());
+    let snap = crate::market::snapshot(&st.http, (y, m)).await;
+    if let Ok(mut w) = st.market.write() {
+        *w = snap;
+    }
 }
 
 pub fn build_schema(state: Arc<AppState>) -> RrdSchema {
@@ -388,6 +445,20 @@ impl QueryRoot {
         })
     }
 
+    /// 資金運用・投資の参考情報(政策金利・国債利回り・為替・外貨定期預金金利)。
+    async fn market(&self, ctx: &Context<'_>) -> Result<MarketView> {
+        let st = state(ctx);
+        let market = st.market.read().map_err(err_poison)?.clone();
+        let deposits = st.deposits.read().map_err(err_poison)?.clone();
+        Ok(MarketView {
+            market,
+            deposits,
+            deposits_collecting: st
+                .deposits_running
+                .load(std::sync::atomic::Ordering::SeqCst),
+        })
+    }
+
     /// 世界リサーチの対象にできる国・地域。
     async fn research_countries(&self) -> Vec<ResearchCountry> {
         crate::research::COUNTRIES
@@ -454,6 +525,14 @@ pub struct ChartImage {
     /// GPU を使えず CPU に切り替えた理由。
     pub fallback_reason: Option<String>,
     pub millis: f64,
+}
+
+#[derive(SimpleObject)]
+pub struct MarketView {
+    pub market: crate::market::MarketSnapshot,
+    pub deposits: crate::deposits::DepositSnapshot,
+    /// 外貨定期預金の金利を収集中か
+    pub deposits_collecting: bool,
 }
 
 #[derive(SimpleObject)]
@@ -645,6 +724,27 @@ impl MutationRoot {
         })
     }
 
+    /// 外貨定期預金の金利をすぐに収集し直す(毎朝の自動収集とは別に)。
+    /// 検索と AI の利用回数を守るため、前回の収集から 6 時間以内は受け付けない。
+    async fn collect_deposit_rates(&self, ctx: &Context<'_>) -> Result<String> {
+        let st = state(ctx).clone();
+        let last = st.deposits.read().map_err(err_poison)?.collected_at_unix;
+        let now = crate::market::now_unix();
+        if st
+            .deposits_running
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok("収集中です。しばらくしてから画面を更新してください".into());
+        }
+        if last > 0 && now.saturating_sub(last) < 6 * 3600 {
+            return Err(Error::new(
+                "前回の収集から6時間以内のため、再収集はできません(毎朝7時に自動で収集します)",
+            ));
+        }
+        tokio::spawn(run_deposit_collection(st));
+        Ok("収集を開始しました(数分かかります)".into())
+    }
+
     /// 世界リサーチ: テーマについて各国の情報を集め、AI(aruaru-llm の無料 AI)で分析・提案する。
     /// 集めた記事はデータセット `name` として保存し、ほかの分析にも使える。
     async fn research(&self, ctx: &Context<'_>, input: ResearchInput) -> Result<ResearchResult> {
@@ -825,12 +925,11 @@ mod tests {
     use super::*;
 
     fn schema() -> RrdSchema {
-        build_schema(Arc::new(AppState {
-            datasets: RwLock::new(HashMap::new()),
-            device: rrd_compute::default_device(),
-            http: reqwest::Client::new(),
-            llm_base: "http://127.0.0.1:1".into(),
-        }))
+        build_schema(Arc::new(AppState::new(
+            rrd_compute::default_device(),
+            "http://127.0.0.1:1".into(),
+            std::env::temp_dir().join("rrd-schema-test-data"),
+        )))
     }
 
     async fn run(s: &RrdSchema, q: &str) -> serde_json::Value {
