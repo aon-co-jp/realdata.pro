@@ -31,3 +31,5 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 scraper = "0.20"
 # 財務省の国債金利 CSV(Shift_JIS)を読むため
 encoding_rs = "0.8"
+# aruaru-db(pgwire 互換)への接続・永続化と版管理
+tokio-postgres = "0.7"

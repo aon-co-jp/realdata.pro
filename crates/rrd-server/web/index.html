@@ -187,6 +187,7 @@ button:disabled{opacity:.5;cursor:progress}
       <button role="tab" data-tab="group">集計</button>
       <button role="tab" data-tab="regress">回帰</button>
       <button role="tab" data-tab="explain">AIで説明</button>
+      <button role="tab" data-tab="versions" id="tabVersions" hidden>版の記録</button>
     </div>
 
     <div data-panel="preview"><button id="doPreview">表示</button></div>
@@ -219,6 +220,12 @@ button:disabled{opacity:.5;cursor:progress}
         <div><label for="rFeatures">説明変数(複数選択可)</label><select id="rFeatures" multiple size="5"></select></div>
       </div>
       <button id="doRegress">重回帰(open-cuda)</button>
+    </div>
+    <div data-panel="versions" hidden>
+      <p class="meta">選んだデータセットを aruaru-db に保存し、その時点を「版」として記録します。あとから過去の版を読み込み直して、当時の分析をそのまま再現できます(再起動しても消えません)。</p>
+      <label for="verNote">メモ(例: 9月分の売上・欠損補完前)</label><input id="verNote" type="text" maxlength="200">
+      <button id="doSaveVer">保存して版を記録</button>
+      <div id="verOut"></div>
     </div>
     <div data-panel="explain" hidden>
       <div class="row">
@@ -663,6 +670,39 @@ $('doRegress').onclick = async () => {
 };
 gql('{ computeDevice }').then(d => $('device').textContent = '計算デバイス: ' + d.computeDevice).catch(() => {});
 refresh().catch(showError);
+
+// ───── 版の記録(aruaru-db)─────
+async function refreshVersions() {
+  const out = $('verOut'); out.innerHTML = '';
+  if (!current) { out.append(el('p', { className: 'meta' }, 'データセットを選んでください')); return; }
+  try {
+    const d = await gql('query($n:String!){ datasetVersions(name:$n){ commitId note createdUnix } }', { n: current.name });
+    if (!d.datasetVersions.length) { out.append(el('p', { className: 'meta' }, 'このデータセットの版はまだありません')); return; }
+    const rows = d.datasetVersions.map(v => {
+      const b = el('button', { className: 'secondary' }, 'この版を読み込む'); b.style.margin = '0';
+      b.onclick = async () => {
+        b.disabled = true;
+        try {
+          const into = safeName(`${current.name}_${v.commitId.slice(0, 8)}`, 'restored');
+          const r = await gql('mutation($n:String!,$c:String!,$i:String!){ restoreDataset(name:$n, commitId:$c, into:$i){ name rows } }', { n: current.name, c: v.commitId, i: into });
+          await refresh(r.restoreDataset.name); out.append(el('p', { className: 'meta' }, `「${r.restoreDataset.name}」として読み込みました(${r.restoreDataset.rows}行)`));
+        } catch (e) { out.append(el('p', { className: 'err' }, e.message)); } finally { b.disabled = false; }
+      };
+      return [fmtTime(v.createdUnix), v.note || '—', v.commitId.slice(0, 12), b];
+    });
+    out.append(simpleTable(['日時', 'メモ', '版の ID', ''], rows));
+  } catch (e) { out.append(el('p', { className: 'err' }, e.message)); }
+}
+document.querySelector('[data-tab=versions]').addEventListener('click', refreshVersions);
+$('ds').addEventListener('change', () => { if (!$('tabVersions').hidden && !document.querySelector('[data-panel=versions]').hidden) refreshVersions(); });
+$('doSaveVer').onclick = async () => {
+  if (!current) { showError(new Error('データセットを選んでください')); return; }
+  $('doSaveVer').disabled = true;
+  try { await gql('mutation($n:String!,$m:String!){ saveDataset(name:$n, note:$m){ commitId } }', { n: current.name, m: $('verNote').value.trim() }); $('verNote').value = ''; await refreshVersions(); }
+  catch (e) { $('verOut').innerHTML = ''; $('verOut').append(el('p', { className: 'err' }, e.message)); }
+  finally { $('doSaveVer').disabled = false; }
+};
+gql('{ versioningEnabled }').then(d => { $('tabVersions').hidden = !d.versioningEnabled; }).catch(() => {});
 
 // ───── 起業・企業向けサービス(サンプル)─────
 // 入力はこの端末内だけで計算し、サーバーへは一切送らない(fetch を使わない)。

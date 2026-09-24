@@ -27,6 +27,8 @@ pub struct AppState {
     pub deposits_running: std::sync::atomic::AtomicBool,
     /// 収集結果などを保存するフォルダ
     pub data_dir: std::path::PathBuf,
+    /// aruaru-db による永続化・版管理(RRD_DB_DSN 未設定なら None)
+    pub store: Option<crate::store::Store>,
 }
 
 impl AppState {
@@ -44,6 +46,7 @@ impl AppState {
             deposits: RwLock::new(crate::deposits::load(&data_dir)),
             deposits_running: std::sync::atomic::AtomicBool::new(false),
             data_dir,
+            store: None,
         }
     }
 }
@@ -459,6 +462,32 @@ impl QueryRoot {
         })
     }
 
+    /// aruaru-db(版管理)が使えるか。
+    async fn versioning_enabled(&self, ctx: &Context<'_>) -> bool {
+        state(ctx).store.is_some()
+    }
+
+    /// データセットの版の履歴(新しい順)。
+    async fn dataset_versions(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+    ) -> Result<Vec<DatasetVersion>> {
+        let store = need_store(ctx)?;
+        check_name(&name)?;
+        Ok(store
+            .versions(Some(&name))
+            .await
+            .map_err(|e| Error::new(format!("{e:#}")))?
+            .into_iter()
+            .map(|v| DatasetVersion {
+                commit_id: v.commit_id,
+                note: v.note,
+                created_unix: v.created_unix,
+            })
+            .collect())
+    }
+
     /// 世界リサーチの対象にできる国・地域。
     async fn research_countries(&self) -> Vec<ResearchCountry> {
         crate::research::COUNTRIES
@@ -483,12 +512,18 @@ impl QueryRoot {
     }
 }
 
+fn need_store<'a>(ctx: &Context<'a>) -> Result<&'a crate::store::Store> {
+    state(ctx).store.as_ref().ok_or_else(|| {
+        Error::new("版管理(aruaru-db)が設定されていません。環境変数 RRD_DB_DSN を設定してください")
+    })
+}
+
 fn err_poison<T>(_: T) -> Error {
     Error::new("内部状態へのアクセスに失敗しました")
 }
 
 /// データセットを保存する(上限を確認し、同名は上書き)。
-fn store(ctx: &Context<'_>, name: String, df: DataFrame) -> Result<DatasetInfo> {
+fn store_dataset(ctx: &Context<'_>, name: String, df: DataFrame) -> Result<DatasetInfo> {
     check_name(&name)?;
     let mut map = state(ctx).datasets.write().map_err(err_poison)?;
     if !map.contains_key(&name) && map.len() >= MAX_DATASETS {
@@ -525,6 +560,13 @@ pub struct ChartImage {
     /// GPU を使えず CPU に切り替えた理由。
     pub fallback_reason: Option<String>,
     pub millis: f64,
+}
+
+#[derive(SimpleObject)]
+pub struct DatasetVersion {
+    pub commit_id: String,
+    pub note: String,
+    pub created_unix: i64,
 }
 
 #[derive(SimpleObject)]
@@ -673,7 +715,7 @@ impl MutationRoot {
     async fn load_csv(&self, ctx: &Context<'_>, name: String, csv: String) -> Result<DatasetInfo> {
         check_name(&name)?;
         let df = rrd_core::csv::read_csv_str(&csv).map_err(err)?;
-        store(ctx, name, df)
+        store_dataset(ctx, name, df)
     }
 
     /// 検索ワードで Google / YouTube / GitHub を検索し、結果をデータセットにする(aruaru-llm 経由)。
@@ -702,7 +744,7 @@ impl MutationRoot {
         .await
         .map_err(|e| Error::new(format!("{e:#}")))?;
         Ok(ImportResult {
-            dataset: store(ctx, name, im.df)?,
+            dataset: store_dataset(ctx, name, im.df)?,
             method: im.method,
         })
     }
@@ -719,9 +761,61 @@ impl MutationRoot {
             .await
             .map_err(|e| Error::new(format!("{e:#}")))?;
         Ok(ImportResult {
-            dataset: store(ctx, name, im.df)?,
+            dataset: store_dataset(ctx, name, im.df)?,
             method: im.method,
         })
+    }
+
+    /// データセットを aruaru-db に保存し、その時点を「版」として記録する(Git-on-SQL の commit)。
+    async fn save_dataset(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        #[graphql(default)] note: String,
+    ) -> Result<DatasetVersion> {
+        let store = need_store(ctx)?;
+        check_name(&name)?;
+        if note.chars().count() > 200 {
+            return Err(Error::new("メモは200文字までです"));
+        }
+        let csv = with_dataset(ctx, &name, |df| Ok(rrd_core::csv::to_csv_string(df)))?;
+        let now = crate::market::now_unix() as i64;
+        let e = |e: anyhow::Error| Error::new(format!("{e:#}"));
+        store.save(&name, &csv, now).await.map_err(e)?;
+        // 履歴には利用者のメモを残し、aruaru-db のコミットメッセージは固定の英数字にする
+        let commit_id = store
+            .commit(&format!("realdata.pro save {name}"))
+            .await
+            .map_err(e)?;
+        store
+            .record_version(&commit_id, &name, &note, now)
+            .await
+            .map_err(e)?;
+        Ok(DatasetVersion {
+            commit_id,
+            note,
+            created_unix: now,
+        })
+    }
+
+    /// 過去の版のデータセットを into として読み込み直す(AS OF COMMIT で分析を再現)。
+    async fn restore_dataset(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        commit_id: String,
+        into: String,
+    ) -> Result<DatasetInfo> {
+        let store = need_store(ctx)?;
+        check_name(&name)?;
+        check_name(&into)?;
+        let csv = store
+            .read_as_of(&name, &commit_id)
+            .await
+            .map_err(|e| Error::new(format!("{e:#}")))?
+            .ok_or_else(|| Error::new("その版にはこのデータセットがありません"))?;
+        let df = rrd_core::csv::read_csv_str(&csv).map_err(err)?;
+        store_dataset(ctx, into, df)
     }
 
     /// 外貨定期預金の金利をすぐに収集し直す(毎朝の自動収集とは別に)。
@@ -854,7 +948,7 @@ impl MutationRoot {
                     query: q.clone(),
                 })
                 .collect(),
-            dataset: store(ctx, input.name, out.df)?,
+            dataset: store_dataset(ctx, input.name, out.df)?,
             reports,
             by_country: to_entries(by_country),
             by_source: to_entries(by_source),
@@ -906,17 +1000,25 @@ impl MutationRoot {
     ) -> Result<DatasetInfo> {
         check_name(&into)?;
         let out = with_dataset(ctx, &source, |df| apply_transform(df, &steps).map_err(err))?;
-        store(ctx, into, out)
+        store_dataset(ctx, into, out)
     }
 
     /// データセットを削除する。存在していれば true。
+    /// aruaru-db に保存済みなら、保存分も削除する(再起動で復活しないように)。過去の版は残る。
     async fn drop_dataset(&self, ctx: &Context<'_>, name: String) -> Result<bool> {
-        Ok(state(ctx)
+        let existed = state(ctx)
             .datasets
             .write()
             .map_err(err_poison)?
             .remove(&name)
-            .is_some())
+            .is_some();
+        if let Some(store) = &state(ctx).store {
+            store
+                .delete(&name)
+                .await
+                .map_err(|e| Error::new(format!("{e:#}")))?;
+        }
+        Ok(existed)
     }
 }
 

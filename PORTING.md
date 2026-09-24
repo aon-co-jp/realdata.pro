@@ -56,6 +56,24 @@
 - **仕事・研修**: 求人は audiocafe.tokyo の既存ページへリンクする。夜間の仕事には「18歳未満不可」と表示する。
   IT 研修・転職エージェントは「準備中」(ユーザー指示)。
 
+## aruaru-db による保存と版管理(P2、2026-09-24)
+
+- `RRD_DB_DSN` を設定すると、データセットを aruaru-db に保存し、「版」を記録できる(`store.rs`)。
+  - **保存**: `saveDataset` が `rrd_datasets` に保存し、`SELECT aruaru_commit()` でその時点を版として記録する。
+    利用者のメモとコミット ID は `rrd_versions` に残す。
+  - **再現**: `restoreDataset` が `SELECT … AS OF COMMIT '<id>'` で過去の版を別名で読み込み直す。
+  - 起動時に保存済みのデータセットを読み込む。`dropDataset` は保存分も消すが、過去の版は残る。
+  - 未設定・接続失敗のときは、これまでどおりメモリ上のみで動く(版管理のタブは表示しない)。
+- **aruaru-db の実バグ**(2026-09-24 発見): INSERT の解析(`aruaru-query/src/parser.rs` の `parse_insert`)が、
+  値の中の `,` `)` 引用符を区別しないため、CSV のような文字列を保存できない
+  (「INSERT: 3 columns but 5 values」)。realdata.pro は値を Base64 にして回避している。aruaru-db 側の修正は別作業として切り出した。
+- aruaru-db のパラメータは文字列として扱われるため、日時も TEXT で保存する(BIGINT の束縛は失敗した)。
+- **VPS の aruaru-db は `ARUARU_USERS` が未設定で、誰も pgwire にログインできない状態**(2026-09-24 確認、
+  journal に警告が出ている)。VPS で版管理を使うには、専用ユーザーを設定して aruaru-server を再起動する必要がある
+  (本番 DB の再起動を伴うため、ユーザーの了承を得てから行う)。
+- ローカルの検証は、`aruaru-server --pg-port 15433 …` を `ARUARU_USERS=rrd:<検証用パスワード>` で起動し、
+  `RRD_TEST_DSN` を設定して `cargo test -p rrd-server store` を実行する(未設定なら省略される)。
+
 ## 世界リサーチ(2026-09-24)
 
 テーマと国・地域(最大6)を選ぶだけで、各国の情報を集め、解析・分析し、提案まで出す(`research.rs`、GraphQL `research`)。
