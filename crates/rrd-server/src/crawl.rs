@@ -2,9 +2,9 @@
 //!
 //! 毎日 7:00(日本時間)以降の最初の機会に、下の `TOPICS` を「日本全体」と、日替わりの都道府県で検索し、
 //! 記事の見出し・要約・URL だけをデータセット `daily_jp_YYYYMMDD` に保存する(AI の分析はしない)。
-//! 都道府県は毎日 `PREFS_PER_DAY`(既定1、環境変数 `RRD_CRAWL_PREFS_PER_DAY` で変更)ずつ順番に回る。
-//! 共有の検索は無料枠が1日100回のため、既定は「日本全体+1都道府県」(約50回)に抑えている。
-//! 検索の枠を増やしたら、`RRD_CRAWL_PREFS_PER_DAY` を増やすと全国を早く一巡できる。
+//! 「場所(日本全体+47都道府県)×知りたい情報」の組を順番に、毎日 `searches_per_day()`(既定20、環境変数
+//! `RRD_CRAWL_SEARCHES_PER_DAY` で変更、最大200)組ずつ検索して回る。共有の検索は無料枠が1日100回のため、
+//! 既定は少なめにしてある。検索の枠を増やしたら、この値を増やすと全国を早く一巡できる。
 //! 保存先は `RRD_DATA_DIR/daily/`。古いものは `KEEP_DAYS` 日ぶんだけ残す。
 
 use std::path::PathBuf;
@@ -45,18 +45,18 @@ pub const TOPICS: &[&str] = &[
     "job_construction",
     "job_facility",
 ];
-const DEFAULT_PREFS_PER_DAY: usize = 1;
+const DEFAULT_SEARCHES_PER_DAY: usize = 20;
 const KEEP_DAYS: usize = 7;
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 /// 最後に収集を試みた日(通算日)。失敗しても同じ日に何度も検索し直さない(検索の無料枠を守る)
 static LAST_TRY_DAY: AtomicU64 = AtomicU64::new(0);
 
-fn prefs_per_day() -> usize {
-    std::env::var("RRD_CRAWL_PREFS_PER_DAY")
+fn searches_per_day() -> usize {
+    std::env::var("RRD_CRAWL_SEARCHES_PER_DAY")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .map_or(DEFAULT_PREFS_PER_DAY, |n| n.clamp(0, 6))
+        .map_or(DEFAULT_SEARCHES_PER_DAY, |n| n.clamp(1, 200))
 }
 
 fn day_index(unix: u64) -> u64 {
@@ -109,15 +109,24 @@ pub fn load_latest(st: &Arc<AppState>) {
     }
 }
 
-/// 今日の都道府県(日替わりで順番に回る)
-fn prefectures_for(day_index: u64, per_day: usize, all: &[String]) -> Vec<String> {
-    if all.is_empty() {
+/// 今日検索する(場所, 知りたい情報)の組。場所は 0=日本全体、1〜=都道府県(`prefs` の順)。
+/// 「場所 × 知りたい情報」を場所順に並べ、毎日 `budget` 組ずつ続きから取る(終わったら最初に戻る)。
+fn plan(day_index: u64, budget: usize, n_places: usize) -> Vec<(usize, Vec<&'static str>)> {
+    let total = n_places * TOPICS.len();
+    if total == 0 {
         return Vec::new();
     }
-    let start = (day_index as usize * per_day) % all.len();
-    (0..per_day.min(all.len()))
-        .map(|i| all[(start + i) % all.len()].clone())
-        .collect()
+    let start = (day_index as usize * budget) % total;
+    let mut out: Vec<(usize, Vec<&'static str>)> = Vec::new();
+    for k in 0..budget.min(total) {
+        let idx = (start + k) % total;
+        let (place, topic) = (idx / TOPICS.len(), TOPICS[idx % TOPICS.len()]);
+        match out.last_mut() {
+            Some((p, v)) if *p == place => v.push(topic),
+            _ => out.push((place, vec![topic])),
+        }
+    }
+    out
 }
 
 pub async fn run_daily(st: Arc<AppState>) {
@@ -142,23 +151,29 @@ async fn collect(st: &Arc<AppState>) -> anyhow::Result<()> {
         .into_iter()
         .map(|i| i.code)
         .collect();
-    let todays = prefectures_for(day_index(now), prefs_per_day(), &prefs);
-    let mut places = vec![Place {
-        country: "JP".into(),
-        ..Default::default()
-    }];
-    places.extend(todays.iter().map(|c| Place {
-        country: "JP".into(),
-        region: Some(c.clone()),
-        city: None,
-    }));
+    let mut places: Vec<(Place, Vec<String>)> = Vec::new();
+    for (idx, topics) in plan(day_index(now), searches_per_day(), prefs.len() + 1) {
+        let region = if idx == 0 {
+            None
+        } else {
+            prefs.get(idx - 1).cloned()
+        };
+        places.push((
+            Place {
+                country: "JP".into(),
+                region,
+                city: None,
+            },
+            topics.iter().map(|s| s.to_string()).collect(),
+        ));
+    }
     let mut merged: Option<String> = None;
     let (mut ok, mut failed) = (0usize, 0usize);
-    for place in places {
+    for (place, topics) in places {
         let opt = research::Options {
             theme: String::new(),
             places: vec![place],
-            topics: TOPICS.iter().map(|s| s.to_string()).collect(),
+            topics,
             search_languages: Vec::new(),
             translate_items: false,
             per_country: 3,
@@ -239,19 +254,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prefectures_rotate_and_cover_all() {
-        let all: Vec<String> = (0..47).map(|i| i.to_string()).collect();
+    fn plan_uses_the_budget_and_covers_everything_eventually() {
+        let n_places = 48;
+        let total = n_places * TOPICS.len();
         let mut seen = std::collections::HashSet::new();
-        for day in 0..8 {
-            let v = prefectures_for(day, 6, &all);
-            assert_eq!(v.len(), 6);
-            seen.extend(v);
+        let days = total.div_ceil(20) as u64;
+        for day in 0..days {
+            let p = plan(day, 20, n_places);
+            assert_eq!(p.iter().map(|(_, v)| v.len()).sum::<usize>(), 20);
+            for (place, topics) in p {
+                for t in topics {
+                    seen.insert((place, t));
+                }
+            }
         }
-        assert_eq!(seen.len(), 47);
-        let one: std::collections::HashSet<_> =
-            (0..47).flat_map(|d| prefectures_for(d, 1, &all)).collect();
-        assert_eq!(one.len(), 47, "既定の1日1都道府県でも47日で一巡する");
-        assert!(prefectures_for(0, 1, &[]).is_empty());
+        assert_eq!(seen.len(), total, "毎日20組ずつで、全ての組を一巡する");
+        assert!(plan(0, 20, 0).is_empty());
     }
 
     #[test]
