@@ -1,7 +1,8 @@
 //! 自動性能検査の状態と、GraphQL で見せる形(`rrd-tune` を使う)。
 //!
-//! - 起動時に構成(CPU・GPU・NPU)を調べ、前回の検査結果と構成が同じで、7日以内なら再利用する。
-//!   構成が変わった(GPU を付け替えた等)・結果が無い・7日以上前なら、裏で自動的に再検査する。
+//! - 起動時に構成(CPU・GPU・NPU)を調べ、**その日(日本時間)にまだ検査していなければ**検査する(その日の最初の起動)。
+//!   同じ日に再起動した場合は、構成が同じなら前回の結果を再利用する。
+//!   起動したままでも、毎朝7時(日本時間)に検査し直す。構成が変わった(GPU を付け替えた等)ときは、いつでも再検査する。
 //! - 処理の実行時に、処理の大きさから経路(CPU / GPU)を選び、使用実績(回数・時間)を数える。
 //! - 「割り当ての割合」は検査結果から計算した**推奨**、「使用実績」は実際に選ばれた**結果**として別々に出す。
 
@@ -14,8 +15,15 @@ use async_graphql::SimpleObject;
 use opencuda_core::GpuDevice;
 use rrd_tune::{Profile, Workload};
 
-/// 検査結果を再利用する最長の期間。
-const MAX_AGE_SECS: u64 = 7 * 24 * 3600;
+/// 毎朝の自動検査を行う時刻(日本時間の時)。
+const MORNING_HOUR: u32 = 7;
+
+/// 2つの時刻が日本時間で同じ日か。
+fn same_day(a: u64, b: u64) -> bool {
+    let (ay, am, ad, _) = crate::market::jst(a);
+    let (by, bm, bd, _) = crate::market::jst(b);
+    (ay, am, ad) == (by, bm, bd)
+}
 
 #[derive(Default)]
 pub struct TuneState {
@@ -69,7 +77,7 @@ pub async fn ensure_profile(st: Arc<crate::schema::AppState>, force: bool) {
         let (inventory, gpus) = rrd_tune::inventory::detect();
         let fresh = existing.as_ref().is_some_and(|p| {
             p.fingerprint == inventory.fingerprint()
-                && rrd_tune::now_unix().saturating_sub(p.created_unix) < MAX_AGE_SECS
+                && same_day(p.created_unix, rrd_tune::now_unix())
         });
         if fresh && !force {
             (existing.expect("fresh なら存在する"), gpus, false)
@@ -90,7 +98,7 @@ pub async fn ensure_profile(st: Arc<crate::schema::AppState>, force: bool) {
                 );
             } else {
                 eprintln!(
-                    "realdata.pro: 前回の性能検査の結果を再利用します(構成は変わっていません)"
+                    "realdata.pro: 今日の性能検査の結果を再利用します(構成は変わっていません)"
                 );
             }
             if let Ok(mut g) = st.tune.gpus.write() {
@@ -121,11 +129,12 @@ pub fn route(st: &crate::schema::AppState, workload: Workload, work: f64) -> rrd
         }
     }
 }
-/// 起動後に検査を始めるか(初回・構成の変更・7日経過)を、定期実行から呼んで判定する。
+/// 定期実行から呼ぶ判定: 検査結果が無い、または今日(日本時間)まだ検査しておらず朝7時を過ぎていれば true。
 pub fn is_stale(st: &crate::schema::AppState) -> bool {
+    let now = rrd_tune::now_unix();
     match st.tune.profile.read().ok().and_then(|p| p.clone()) {
         None => true,
-        Some(p) => rrd_tune::now_unix().saturating_sub(p.created_unix) >= MAX_AGE_SECS,
+        Some(p) => !same_day(p.created_unix, now) && crate::market::jst(now).3 >= MORNING_HOUR,
     }
 }
 
@@ -373,6 +382,16 @@ pub fn view(st: &crate::schema::AppState) -> ProfileView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_day_uses_japan_time() {
+        // 2026-09-24 14:59:59 JST と 15:00:00 JST は同じ日、2026-09-25 00:00:00 JST は翌日
+        let noon = 1_790_226_000; // 2026-09-24 14:00 JST
+        assert!(same_day(noon, noon + 3599));
+        assert!(same_day(noon, noon - 14 * 3600)); // 00:00 JST
+        assert!(!same_day(noon, noon + 10 * 3600)); // 翌日 00:00 JST
+        assert!(!same_day(noon, noon - 14 * 3600 - 1)); // 前日 23:59:59 JST
+    }
 
     #[test]
     fn record_accumulates_and_view_without_profile_is_unavailable() {

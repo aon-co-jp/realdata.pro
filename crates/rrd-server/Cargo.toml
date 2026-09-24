@@ -35,3 +35,5 @@ scraper = "0.20"
 encoding_rs = "0.8"
 # aruaru-db(pgwire 互換)への接続・永続化と版管理
 tokio-postgres = "0.7"
+# 地名データ(GeoNames の都市一覧 zip)を読むため
+zip = { version = "2", default-features = false, features = ["deflate"] }

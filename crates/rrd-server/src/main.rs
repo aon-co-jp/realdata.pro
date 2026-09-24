@@ -19,6 +19,8 @@ mod explain;
 mod ingest;
 mod languages;
 mod market;
+mod places;
+mod regions;
 mod research;
 mod schema;
 mod store;
@@ -139,6 +141,7 @@ async fn main() -> std::io::Result<()> {
     println!("realdata.pro: 計算デバイス = {}", state.device.info().name);
     tokio::spawn(schedule(state.clone()));
     tokio::spawn(tuning::ensure_profile(state.clone(), false));
+    tokio::spawn(load_regions(state.clone()));
     let schema = build_schema(state);
 
     let (addr, handle) = Server::new(TcpListener::bind(bind))
@@ -177,5 +180,25 @@ async fn schedule(state: Arc<AppState>) {
         if hour >= 7 && (last == 0 || (ly, lm, ld) != (y, m, d)) {
             tokio::spawn(schema::run_deposit_collection(state.clone()));
         }
+    }
+}
+
+/// 地名データを読み込む。失敗したら1時間おきに再試行する。
+async fn load_regions(state: std::sync::Arc<schema::AppState>) {
+    loop {
+        match regions::load(&state.http, &state.data_dir).await {
+            Ok(r) => {
+                println!(
+                    "realdata.pro: 地名データを読み込みました(国 {} 件)",
+                    r.countries.len()
+                );
+                if let Ok(mut w) = state.regions.write() {
+                    *w = Some(std::sync::Arc::new(r));
+                }
+                return;
+            }
+            Err(e) => eprintln!("realdata.pro: 地名データを読み込めません(1時間後に再試行): {e:#}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
     }
 }

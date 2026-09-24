@@ -61,11 +61,17 @@ button:disabled{opacity:.5;cursor:progress}
 .kpi{border:1px solid var(--line);border-radius:8px;padding:8px 12px}
 .kpi b{display:block;font-size:20px}
 .scroll{overflow-x:auto}
+.legend{list-style:none;margin:8px 0 0;padding:0;font-size:16px;line-height:1.6}
+.legend .sw{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:8px;vertical-align:-1px}
+.sitelang{float:right;font-size:13px}
+.sitelang select{width:auto;max-width:190px}
+.trans{color:var(--muted);font-size:13px}
+.note{border-left:3px solid #c9a227;padding:6px 10px;margin:8px 0;font-size:14px}
 .charts2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;align-items:start}
 </style>
 </head>
 <body>
-<header><h1>realdata.pro</h1><small>Rust製インメモリ分析 · RPoem + open-cuda · <span id="device">…</span></small></header>
+<header><div class="sitelang"><label for="siteLang" style="display:inline">🌐 このサイトを翻訳 / Translate this site</label> <select id="siteLang" aria-label="サイトの言語 / Site language"><option value="">日本語(原文) / Japanese</option></select></div><h1>realdata.pro</h1><small>Rust製インメモリ分析 · RPoem + open-cuda · <span id="device">…</span></small></header>
 <main>
   <section id="bizsvc">
     <div class="sample-banner" role="note">
@@ -115,7 +121,7 @@ button:disabled{opacity:.5;cursor:progress}
 
   <section id="tune">
     <h2>⚙ 性能の自動検査(CPU・GPU・NPU)</h2>
-    <p class="meta">この機器の CPU(AVX-512 / AVX2 など)と GPU を実際に動かして測り、処理の種類と大きさごとに一番速い経路を自動で選びます。GPU の結果が CPU と一致しない場合は、速くても使いません。構成が変わったとき、または7日ごとに自動で検査し直します。</p>
+    <p class="meta">この機器の CPU(AVX-512 / AVX2 など)と GPU を実際に動かして測り、処理の種類と大きさごとに一番速い経路を自動で選びます。GPU の結果が CPU と一致しない場合は、速くても使いません。その日の最初に起動したとき、毎朝7時(日本時間)、そして構成が変わったときに、自動で検査し直します。</p>
     <div id="tuneOut"><p class="meta">読み込み中…</p></div>
   </section>
 
@@ -141,15 +147,29 @@ button:disabled{opacity:.5;cursor:progress}
   <section id="research">
     <h2>🌍 世界リサーチ(テーマから情報収集 → 解析 → 提案)</h2>
     <p class="meta">調べたいテーマと国・地域を選ぶだけで、各国の現地語で Web とニュースを集め、AI(aruaru-llm の無料 AI)がトレンド・機会・リスク・具体的な提案をまとめます。</p>
-    <label for="rTheme">テーマ</label>
+    <label for="rTheme">テーマ(空でもかまいません。下の「知りたい情報」だけでも検索できます)</label>
     <input id="rTheme" type="text" placeholder="例: 電気自動車の充電インフラ / 抹茶の海外需要 / 中小企業向けクラウド会計">
-    <div class="row" style="margin-top:8px">
-      <div><label for="rPer">1か国あたりの件数</label><select id="rPer"><option>3</option><option selected>5</option><option>8</option><option>10</option></select></div>
-      <div><label>情報源</label><label><input type="checkbox" checked disabled> Web 検索(現地語)</label><label><input type="checkbox" id="rNews" checked> 国別の主要ニュース</label><label><input type="checkbox" id="rGithub"> GitHub</label><label><input type="checkbox" id="rYoutube"> YouTube</label></div>
-      <div><label>レポートの言語</label><label><input type="checkbox" id="rJa" checked> 日本語</label><label><input type="checkbox" id="rEn" checked> 英語</label><select id="rOther" aria-label="もう1言語"><option value="">(もう1言語を選ぶ)</option></select></div>
+    <label>調べる場所(最大6つ)<span class="meta" id="rCount"></span></label>
+    <p class="meta">国を選ぶと、次の階層(日本なら 都道府県 → 市区町村、海外なら 州・地方 → 町・市・都市)が開きます。「(国全体)」のままで追加すると国全体、都道府県や市区町村まで選べばその場所だけを調べます。</p>
+    <div class="row">
+      <div><label for="pCountry">国</label><select id="pCountry"><option value="">読み込み中…</option></select></div>
+      <div><label for="pRegion" id="pRegionL">都道府県・州</label><select id="pRegion" disabled><option value="">(国全体)</option></select></div>
+      <div><label for="pCity" id="pCityL">市区町村・都市</label><select id="pCity" disabled><option value="">(すべて)</option></select></div>
     </div>
-    <label>国・地域(最大6つ)<span class="meta" id="rCount"></span></label>
-    <div id="rCountries" class="chips"></div>
+    <label><input type="checkbox" id="pParents"> 上位の区分も含める(例: 渋谷区を選ぶと、東京都と日本全体も調べる)</label>
+    <button id="pAdd" type="button">この場所を追加</button>
+    <div id="rPlaces" class="chips" aria-live="polite"></div>
+    <label>知りたい情報(チェックした項目を、場所ごとに検索します)</label>
+    <div id="rTopics" class="chips"></div>
+    <div id="mtNote" class="note" hidden><strong>⛰ 山・登山の注意:</strong> 富士山などは、バス・タクシーは事前予約、山小屋は必ず予約してください。1年中寒い冬山のため、上下のスキーウェア(防寒・防水)と、ライト付きヘルメットがおすすめです。<span class="meta">(検索結果に加えた一般的な安全上の注意です。出典のある情報ではありません)</span></div>
+    <div class="row" style="margin-top:8px">
+      <div><label for="rPer">1つの検索あたりの件数</label><select id="rPer"><option>3</option><option selected>5</option><option>8</option><option>10</option></select></div>
+      <div><label>情報源</label><label><input type="checkbox" checked disabled> Web 検索(現地語)</label><label><input type="checkbox" id="rNews" checked> 国別の主要ニュース</label><label><input type="checkbox" id="rGithub"> GitHub</label><label><input type="checkbox" id="rYoutube"> YouTube</label></div>
+      <div><label>検索に追加する言語(現地語に加えて最大3つ)</label><select id="sl1" aria-label="追加の検索言語1"><option value="">(なし)</option></select><select id="sl2" aria-label="追加の検索言語2"><option value="">(なし)</option></select><select id="sl3" aria-label="追加の検索言語3"><option value="">(なし)</option></select>
+        <label><input type="checkbox" id="rTrans" checked> 記事の見出し・要約を翻訳して原文と並べて表示 <span class="meta" lang="en">/ Show translated headlines &amp; snippets next to the originals</span></label></div>
+      <div><label>レポートを書く言語(AIが分析してまとめる)</label><label><input type="checkbox" id="rJa" checked> 日本語</label><label><input type="checkbox" id="rEn" checked> 英語</label><select id="rOther" aria-label="もう1言語"><option value="">(もう1言語を選ぶ)</option></select>
+        <p class="meta">先頭の言語で AI が直接分析し、ほかの言語はその翻訳です。集めた記事そのものは現地語(と上で選んだ言語)で、翻訳を併記できます。<span lang="en">The report language is what the AI writes the analysis in; collected articles stay in their original language, with optional translations.</span></p></div>
+    </div>
     <label><input type="checkbox" id="rConsent"> テーマと集めた公開情報を AI(aruaru-llm 経由で外部の AI 事業者を含む)へ送ることに同意します</label>
     <button id="doResearch">リサーチを開始</button>
     <div id="rout"></div>
@@ -314,9 +334,9 @@ function pieChart(t) {
   }
   const total = items.reduce((s, x) => s + x.value, 0);
   if (total <= 0) return el('p', { className: 'meta' }, '円グラフ: 合計が0のため表示できません。');
-  const ns = 'http://www.w3.org/2000/svg', R = 110, cx = 130, cy = 130, legendX = 280;
-  const h = Math.max(260, items.length * 26 + 20);
-  const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', `0 0 560 ${h}`); svg.setAttribute('width', '100%'); svg.style.maxWidth = '560px';
+  const ns = 'http://www.w3.org/2000/svg', R = 110, cx = 130, cy = 130;
+  const legend = el('ul', { className: 'legend' });
+  const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', '0 0 260 260'); svg.setAttribute('width', '100%'); svg.style.maxWidth = '260px';
   svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `${t.columns[1]} の円グラフ`);
   let a0 = -Math.PI / 2;
   items.forEach((x, i) => {
@@ -331,13 +351,12 @@ function pieChart(t) {
     shape.setAttribute('fill', color); shape.setAttribute('stroke', 'var(--panel)'); shape.setAttribute('stroke-width', 2);
     const title = document.createElementNS(ns, 'title'); title.textContent = `${x.label}: ${fmt(String(x.value), true)}(${(frac * 100).toFixed(1)}%)`; shape.append(title);
     svg.append(shape);
-    const y = 20 + i * 26;
-    const sw = document.createElementNS(ns, 'rect'); sw.setAttribute('x', legendX); sw.setAttribute('y', y - 11); sw.setAttribute('width', 14); sw.setAttribute('height', 14); sw.setAttribute('rx', 3); sw.setAttribute('fill', color);
-    const lab = document.createElementNS(ns, 'text'); lab.setAttribute('x', legendX + 22); lab.setAttribute('y', y); lab.textContent = `${x.label}  ${(frac * 100).toFixed(1)}%(${fmt(String(x.value), true)})`;
-    svg.append(sw, lab);
+    const li = el('li'); const sw = el('span', { className: 'sw' }); sw.style.background = color;
+    li.append(sw, `${x.label}  ${(frac * 100).toFixed(1)}%(${fmt(String(x.value), true)})`); legend.append(li);
     a0 = a1;
   });
-  return svg;
+  const wrap = el('div'); wrap.append(svg, legend);
+  return wrap;
 }
 
 function fillSelect(sel, cols, { numericOnly = false, blank = false } = {}) {
@@ -492,23 +511,86 @@ gql('{ languages { code nameJa nativeName } researchCountries { name nameJa } }'
     $('rOther').append(el('option', { value: l.code }, `${l.nameJa} — ${l.nativeName}`));
   }
   for (const c of d.researchCountries) countryJa.set(c.name, c.nameJa);
-  for (const c of d.researchCountries) {
-    const lab = el('label'); const cb = el('input', { type: 'checkbox', value: c.name });
-    if (c.name === 'Japan' || c.name === 'United States') cb.checked = true;
-    cb.onchange = updateCountryCount; lab.append(cb, c.nameJa); $('rCountries').append(lab);
-  }
-  updateCountryCount();
+  for (const l of d.languages) for (const id of ['sl1', 'sl2', 'sl3']) $(id).append(el('option', { value: l.code }, `${l.nameJa} — ${l.nativeName}`));
+  // サイト全体の翻訳(Google 翻訳のページへ移動する)
+  for (const l of d.languages) if (l.code !== 'ja') $('siteLang').append(el('option', { value: l.code }, `${l.nameJa} — ${l.nativeName}`));
 }).catch(() => {});
+$('siteLang').onchange = () => {
+  const c = $('siteLang').value; if (!c) return;
+  const map = { 'zh-Hans': 'zh-CN', 'zh-Hant': 'zh-TW' };
+  const u = new URL(location.href); u.hash = '';
+  if (confirm('このページの表示を、Google 翻訳のページで翻訳します(ページの内容が Google に送られます)。よろしいですか?\nTranslate this page with Google Translate? (The page content is sent to Google.)'))
+    location.href = `https://translate.google.com/translate?sl=ja&tl=${encodeURIComponent(map[c] || c)}&u=${encodeURIComponent(u.href)}`;
+  else $('siteLang').value = '';
+};
+// ───── 調べる場所の選択(国 → 都道府県・州 → 市区町村・都市) ─────
+const MAX_RC = 6;
+const places = []; let regionsReady = false;
+function updatePlaceCount() { $('rCount').textContent = ` ${places.length}/${MAX_RC} 選択中`; }
+function renderPlaces() {
+  $('rPlaces').innerHTML = '';
+  places.forEach((p, i) => {
+    const lab = el('label'); lab.append(p.label + ' ');
+    const x = el('button', { type: 'button', 'aria-label': `${p.label} を外す` }, '×'); x.style.cssText = 'padding:0 6px;margin-left:4px';
+    x.onclick = () => { places.splice(i, 1); renderPlaces(); }; lab.append(x); $('rPlaces').append(lab);
+  });
+  updatePlaceCount();
+}
+function fillOpts(sel, first, items) { sel.innerHTML = ''; sel.append(el('option', { value: '' }, first)); for (const i of items) sel.append(el('option', { value: i.code }, i.name)); }
+async function loadCountries() {
+  const d = await gql('{ regionCountries { code nameEn main } researchCountries { name nameJa } }');
+  const ja = new Map(d.researchCountries.map(c => [c.name, c.nameJa]));
+  regionsReady = d.regionCountries.length > 0;
+  $('pCountry').innerHTML = ''; $('pCountry').append(el('option', { value: '' }, regionsReady ? '(国を選ぶ)' : '地名データを準備中です…'));
+  for (const c of d.regionCountries) $('pCountry').append(el('option', { value: c.code }, ja.get(c.nameEn) ? `${ja.get(c.nameEn)}(${c.nameEn})` : c.nameEn));
+  if (!regionsReady) setTimeout(() => loadCountries().catch(() => {}), 15000);
+}
+loadCountries().catch(() => {});
+$('pCountry').onchange = async () => {
+  const cc = $('pCountry').value; fillOpts($('pRegion'), '(国全体)', []); fillOpts($('pCity'), '(すべて)', []); $('pRegion').disabled = $('pCity').disabled = true;
+  if (!cc) return;
+  try {
+    const c = (await gql('query($c:String!){ regionChildren(country:$c){ ready level label items{ code name } } }', { c: cc })).regionChildren;
+    if (c.level === 'city') { $('pCityL').textContent = c.label; fillOpts($('pCity'), '(すべて)', c.items); $('pCity').disabled = false; $('pRegionL').textContent = '都道府県・州(この国は区分なし)'; }
+    else { $('pRegionL').textContent = c.label; fillOpts($('pRegion'), '(国全体)', c.items); $('pRegion').disabled = false; }
+  } catch (e) { $('rout').innerHTML = ''; $('rout').append(el('p', { className: 'err' }, e.message)); }
+};
+$('pRegion').onchange = async () => {
+  const cc = $('pCountry').value, rg = $('pRegion').value; fillOpts($('pCity'), '(すべて)', []); $('pCity').disabled = true;
+  if (!rg) return;
+  try {
+    const c = (await gql('query($c:String!,$p:String){ regionChildren(country:$c, parent:$p){ label items{ code name } } }', { c: cc, p: rg })).regionChildren;
+    $('pCityL').textContent = c.label; fillOpts($('pCity'), '(すべて)', c.items); $('pCity').disabled = !c.items.length;
+  } catch (e) { $('rout').innerHTML = ''; $('rout').append(el('p', { className: 'err' }, e.message)); }
+};
+const optText = (sel) => sel.selectedOptions[0]?.textContent || '';
+$('pAdd').onclick = () => {
+  const cc = $('pCountry').value; if (!cc) return;
+  const cn = optText($('pCountry')).replace(/\(.*\)$/, ''), rg = $('pRegion').value, rn = optText($('pRegion'));
+  const cityCode = $('pCity').value, cityName = optText($('pCity'));
+  const list = [];
+  const country = { country: cc, label: cn }, region = rg && { country: cc, region: rg, label: `${cn} › ${rn}` };
+  const city = cityCode && { country: cc, region: rg || null, city: cityCode, label: `${cn} › ${rg ? rn + ' › ' : ''}${cityName}` };
+  if ($('pParents').checked) { list.push(country); if (region) list.push(region); if (city) list.push(city); } else list.push(city || region || country);
+  for (const p of list) {
+    if (places.some(q => q.country === p.country && (q.region || null) === (p.region || null) && (q.city || null) === (p.city || null))) continue;
+    if (places.length >= MAX_RC) { $('rout').innerHTML = ''; $('rout').append(el('p', { className: 'err' }, `場所は最大${MAX_RC}つまでです`)); break; }
+    places.push(p);
+  }
+  renderPlaces();
+};
+gql('{ researchTopics { id label } }').then(d => {
+  for (const tp of d.researchTopics) {
+    const lab = el('label'); const cb = el('input', { type: 'checkbox', value: tp.id });
+    cb.onchange = () => { $('mtNote').hidden = !$('rTopics').querySelector('input[value=mountain]').checked; };
+    lab.append(cb, tp.label); $('rTopics').append(lab);
+  }
+}).catch(() => {});
+updatePlaceCount();
 
 // ───── 世界リサーチ ─────
 const countryJa = new Map([['Global', '世界全体']]);
 const sourceJa = { web: 'Web 検索', news: '国別の主要ニュース', github: 'GitHub', youtube: 'YouTube' };
-const MAX_RC = 6;
-function updateCountryCount() {
-  const boxes = [...$('rCountries').querySelectorAll('input')], n = boxes.filter(b => b.checked).length;
-  boxes.forEach(b => { if (!b.checked) b.disabled = n >= MAX_RC; });
-  $('rCount').textContent = ` ${n}/${MAX_RC} 選択中`;
-}
 // 外部由来の URL は http / https のときだけリンクにする(javascript: 等を防ぐ)
 function safeLink(url, text) {
   try { const u = new URL(url); if (u.protocol === 'http:' || u.protocol === 'https:') { const a = el('a', { href: u.href, target: '_blank', rel: 'noopener noreferrer' }, text); return a; } } catch (_) {}
@@ -518,6 +600,7 @@ function safeLink(url, text) {
 let researchItems = new Map();
 function citeText(tag, text) {
   const e = el(tag);
+  text = text.replace(/General advice:\s*/g, '(一般的な注意) ');
   text.split(/(\[\d+(?:\s*,\s*\d+)*\])/g).forEach(part => {
     const m = part.match(/^\[([\d,\s]+)\]$/);
     if (!m) { if (part) e.append(document.createTextNode(part)); return; }
@@ -525,7 +608,7 @@ function citeText(tag, text) {
     m[1].split(',').map(s => Number(s.trim())).forEach((n, i) => {
       if (i) sup.append(', ');
       const it = researchItems.get(n);
-      if (it) { const a = safeLink(it.url || '', String(n)); a.title = `${it.title}(${it.country})`; sup.append(a); } else sup.append(String(n));
+      if (it) { const a = safeLink(it.url || '', String(n)); a.title = `${it.title}${it.titleTr ? ' / ' + it.titleTr : ''}(${it.country})`; sup.append(a); } else sup.append(String(n));
     });
     sup.append(']'); e.append(sup);
   });
@@ -534,7 +617,7 @@ function citeText(tag, text) {
 function evidenceList(ev) {
   if (!ev.length) return null;
   const ul = el('ul', { className: 'ev' });
-  for (const e of ev) { const li = el('li'); li.append(`[${e.no}] `, safeLink(e.url || '', e.title), ` (${e.country})`); ul.append(li); }
+  for (const e of ev) { const li = el('li'); li.append(`[${e.no}] `, safeLink(e.url || '', e.title), ` (${e.country})`); if (e.titleTr) li.append(el('br'), el('span', { className: 'trans' }, `翻訳: ${e.titleTr}`)); ul.append(li); }
   return ul;
 }
 function sentimentChart(list) {
@@ -589,26 +672,27 @@ function renderReport(r) {
 $('doResearch').onclick = async () => {
   const out = $('rout'); out.innerHTML = '';
   const theme = $('rTheme').value.trim();
-  const countries = [...$('rCountries').querySelectorAll('input:checked')].map(b => b.value);
+  const topics = [...$('rTopics').querySelectorAll('input:checked')].map(b => b.value);
+  const searchLanguages = ['sl1', 'sl2', 'sl3'].map(id => $(id).value).filter((v, i, a) => v && a.indexOf(v) === i);
   const langs = []; if ($('rJa').checked) langs.push('ja'); if ($('rEn').checked) langs.push('en'); if ($('rOther').value) langs.push($('rOther').value);
   const fail = (m) => { out.append(el('p', { className: 'err' }, m)); };
-  if (!theme) return fail('テーマを入力してください');
-  if (!countries.length) return fail('国・地域を1つ以上選んでください');
+  if (!theme && !topics.length) return fail('テーマを入力するか、知りたい情報を1つ以上選んでください');
+  if (!places.length) return fail('調べる場所を1つ以上追加してください(国を選んで「この場所を追加」)');
   if (!langs.length) return fail('レポートの言語を1つ以上選んでください');
   if (!$('rConsent').checked) return fail('AI へ送ることへの同意にチェックを入れてください');
   // 日時を付けて、前のリサーチ結果を上書きしない(日本語のテーマは英数字にできないため)
   const now = new Date(), pad = (n) => String(n).padStart(2, '0');
   const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const name = safeName(`research_${stamp}_${theme}`, `research_${stamp}`);
+  const name = safeName(`research_${stamp}_${theme || 'topics'}`, `research_${stamp}`);
   $('doResearch').disabled = true;
   const status = el('p', { className: 'meta' }, '各国の情報を集めて分析しています(1〜3分ほどかかります)…'); out.append(status);
   const t0 = Date.now(); const timer = setInterval(() => status.textContent = `各国の情報を集めて分析しています… ${Math.round((Date.now() - t0) / 1000)}秒`, 1000);
   try {
-    const d = (await gql(`mutation($i:ResearchInput!){ research(input:$i){ millis warnings queries{ country query } items{ no title url country } dataset{ name rows } byCountry{ label count } bySource{ label count }
+    const d = (await gql(`mutation($i:ResearchInput!){ research(input:$i){ millis warnings queries{ country query } items{ no title titleTr url country } dataset{ name rows } byCountry{ label count } bySource{ label count }
       reports{ lang languageName summary provider
-        trends{ title detail countries evidence{ no title url country } } opportunities{ title detail countries evidence{ no title url country } }
-        risks{ title detail countries evidence{ no title url country } } proposals{ action why priority evidence{ no title url country } } sentiment{ country score reason } } } }`,
-      { i: { name, theme, countries, perCountry: Number($('rPer').value), includeNews: $('rNews').checked, includeGithub: $('rGithub').checked, includeYoutube: $('rYoutube').checked, languages: langs, consent: true } })).research;
+        trends{ title detail countries evidence{ no title titleTr url country } } opportunities{ title detail countries evidence{ no title titleTr url country } }
+        risks{ title detail countries evidence{ no title titleTr url country } } proposals{ action why priority evidence{ no title titleTr url country } } sentiment{ country score reason } } } }`,
+      { i: { name, theme, places: places.map(p => ({ country: p.country, region: p.region || null, city: p.city || null })), topics, searchLanguages, translateItems: $('rTrans').checked, perCountry: Number($('rPer').value), includeNews: $('rNews').checked, includeGithub: $('rGithub').checked, includeYoutube: $('rYoutube').checked, languages: langs, consent: true } })).research;
     out.innerHTML = '';
     researchItems = new Map(d.items.map(x => [x.no, x]));
     out.append(el('p', { className: 'meta' }, `${d.dataset.rows}件の情報を集めて分析しました(${(d.millis / 1000).toFixed(1)}秒)。集めた記事はデータセット「${d.dataset.name}」として下の「分析する」でも使えます。`));

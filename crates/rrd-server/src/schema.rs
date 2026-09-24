@@ -31,6 +31,8 @@ pub struct AppState {
     pub store: Option<crate::store::Store>,
     /// 自動性能検査(CPU / GPU の実測と経路の選択)
     pub tune: crate::tuning::TuneState,
+    /// 世界の地名(国・都道府県/州・市区町村/都市)。起動後に裏で読み込む
+    pub regions: RwLock<Option<Arc<crate::regions::RegionData>>>,
 }
 
 impl AppState {
@@ -55,6 +57,7 @@ impl AppState {
             data_dir,
             store: None,
             tune,
+            regions: RwLock::new(None),
         }
     }
 }
@@ -562,6 +565,81 @@ impl QueryRoot {
     }
 
     /// 世界リサーチの対象にできる国・地域。
+    async fn region_countries(&self, ctx: &Context<'_>) -> Vec<RegionCountryView> {
+        let r = state(ctx).regions.read().ok().and_then(|g| g.clone());
+        let Some(r) = r else { return vec![] };
+        let main: Vec<String> = crate::research::COUNTRIES
+            .iter()
+            .map(|c| {
+                if c.1 == "uk" {
+                    "GB".to_string()
+                } else {
+                    c.1.to_ascii_uppercase()
+                }
+            })
+            .collect();
+        let mut v: Vec<RegionCountryView> = r
+            .countries
+            .iter()
+            .map(|c| RegionCountryView {
+                code: c.code.clone(),
+                name_en: c.name.clone(),
+                main: main.contains(&c.code),
+            })
+            .collect();
+        v.sort_by_key(|c| !c.main);
+        v
+    }
+
+    /// 国を選んだあとの次の階層(parent 空=都道府県・州、指定=その中の市区町村・都市)
+    async fn region_children(
+        &self,
+        ctx: &Context<'_>,
+        country: String,
+        parent: Option<String>,
+    ) -> Result<RegionChildrenView> {
+        let r = state(ctx).regions.read().ok().and_then(|g| g.clone());
+        let Some(r) = r else {
+            return Ok(RegionChildrenView {
+                ready: false,
+                level: "region".into(),
+                label: String::new(),
+                items: vec![],
+            });
+        };
+        if r.country(&country).is_none() {
+            return Err(Error::new("国コードが正しくありません"));
+        }
+        let c = match parent.as_deref().filter(|p| !p.is_empty()) {
+            Some(p) => r.cities_of(&country, p),
+            None => r.top_level(&country),
+        };
+        Ok(RegionChildrenView {
+            ready: true,
+            level: c.level,
+            label: c.label,
+            items: c
+                .items
+                .into_iter()
+                .map(|i| RegionItemView {
+                    code: i.code,
+                    name: i.name,
+                })
+                .collect(),
+        })
+    }
+
+    /// 知りたい情報の一覧
+    async fn research_topics(&self) -> Vec<TopicView> {
+        crate::places::TOPICS
+            .iter()
+            .map(|t| TopicView {
+                id: t.id.to_string(),
+                label: t.label.to_string(),
+            })
+            .collect()
+    }
+
     async fn research_countries(&self) -> Vec<ResearchCountry> {
         crate::research::COUNTRIES
             .iter()
@@ -662,9 +740,19 @@ pub struct ResearchInput {
     /// 保存するデータセット名
     pub name: String,
     /// 調べたいテーマ(例: 「電気自動車の充電インフラ」)
+    #[graphql(default)]
     pub theme: String,
-    /// 対象の国・地域(英語名、1〜6)
-    pub countries: Vec<String>,
+    /// 調べる場所(1〜6)。国全体・都道府県/州・市区町村/都市のどの階層も単独で選べる
+    pub places: Vec<PlaceInput>,
+    /// 知りたい情報(`researchTopics` の id)
+    #[graphql(default)]
+    pub topics: Vec<String>,
+    /// 現地語に加えて検索に使う言語(最大3つ)
+    #[graphql(default)]
+    pub search_languages: Vec<String>,
+    /// 記事の見出し・要約を先頭のレポート言語へ翻訳して原文と並べる
+    #[graphql(default)]
+    pub translate_items: bool,
     #[graphql(default = 5)]
     pub per_country: u8,
     #[graphql(default = true)]
@@ -680,10 +768,46 @@ pub struct ResearchInput {
 }
 
 /// 根拠(収集した記事)へのリンク。番号はデータセットの `no` 列と同じ。
+#[derive(InputObject)]
+pub struct PlaceInput {
+    pub country: String,
+    pub region: Option<String>,
+    pub city: Option<String>,
+}
+
+#[derive(SimpleObject)]
+pub struct TopicView {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(SimpleObject)]
+pub struct RegionCountryView {
+    pub code: String,
+    pub name_en: String,
+    pub main: bool,
+}
+
+#[derive(SimpleObject)]
+pub struct RegionItemView {
+    pub code: String,
+    pub name: String,
+}
+
+#[derive(SimpleObject)]
+pub struct RegionChildrenView {
+    pub ready: bool,
+    pub level: String,
+    pub label: String,
+    pub items: Vec<RegionItemView>,
+}
+
 #[derive(SimpleObject, Clone)]
 pub struct Evidence {
     pub no: usize,
     pub title: String,
+    /// 翻訳した見出し(翻訳版を選んだ場合)
+    pub title_tr: Option<String>,
     pub url: Option<String>,
     pub country: String,
 }
@@ -976,12 +1100,32 @@ impl MutationRoot {
         }
         check_name(&input.name)?;
         let st = state(ctx);
+        let regions = st
+            .regions
+            .read()
+            .map_err(|_| Error::new("内部エラー"))?
+            .clone()
+            .ok_or_else(|| {
+                Error::new("地名データを準備中です。1分ほど待ってからもう一度お試しください")
+            })?;
         let out = crate::research::run(
             &st.http,
             &st.llm_base,
+            &regions,
             crate::research::Options {
                 theme: input.theme,
-                countries: input.countries,
+                places: input
+                    .places
+                    .into_iter()
+                    .map(|p| crate::places::Place {
+                        country: p.country,
+                        region: p.region,
+                        city: p.city,
+                    })
+                    .collect(),
+                topics: input.topics,
+                search_languages: input.search_languages,
+                translate_items: input.translate_items,
                 per_country: input.per_country,
                 include_news: input.include_news,
                 include_github: input.include_github,
@@ -997,6 +1141,7 @@ impl MutationRoot {
                 .map(|(n, it)| Evidence {
                     no: n,
                     title: it.title.clone(),
+                    title_tr: it.title_tr.clone(),
                     url: Some(it.url.clone()).filter(|u| !u.is_empty()),
                     country: it.country.clone(),
                 })
@@ -1063,6 +1208,7 @@ impl MutationRoot {
                 .map(|(i, it)| Evidence {
                     no: i + 1,
                     title: it.title.clone(),
+                    title_tr: it.title_tr.clone(),
                     url: Some(it.url.clone()).filter(|u| !u.is_empty()),
                     country: it.country.clone(),
                 })

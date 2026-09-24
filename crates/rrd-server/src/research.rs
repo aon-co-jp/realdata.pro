@@ -19,8 +19,12 @@ use rrd_core::DataFrame;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
+use futures::StreamExt;
+
 use crate::explain::complete;
 use crate::languages;
+use crate::places::{self, Place, Target, Topic};
+use crate::regions::RegionData;
 
 /// リサーチ対象にできる国・地域。
 /// (aruaru-llm の国別ニュースの国名, Google の gl, hl, 日本語名, 翻訳先の言語コード)
@@ -62,14 +66,26 @@ pub const COUNTRIES: &[(&str, &str, &str, &str, &str)] = &[
     ("Myanmar", "mm", "en", "ミャンマー", "my"),
 ];
 
-pub const MAX_COUNTRIES: usize = 6;
+pub const MAX_PLACES: usize = 6;
+/// 1回のリサーチで行う Web 検索の上限(場所 × 検索言語 × (テーマ + 知りたい情報))。検索 API の無料枠を守るため。
+const MAX_SEARCHES: usize = 30;
+/// 現地語に加えて追加できる検索言語の数。
+const MAX_EXTRA_LANGS: usize = 3;
 const MAX_PER_COUNTRY: u8 = 10;
 /// AI に渡す資料の上限文字数(aruaru-llm の上限 20,000 文字に余裕を持たせる)。
 const MAX_BRIEF_CHARS: usize = 14_000;
 
 pub struct Options {
+    /// テーマ(空でもよい。その場合は知りたい情報だけで検索する)
     pub theme: String,
-    pub countries: Vec<String>,
+    /// 調べる場所(国全体・都道府県/州・市区町村/都市)
+    pub places: Vec<Place>,
+    /// 知りたい情報(places::TOPICS の id)
+    pub topics: Vec<String>,
+    /// 現地語に加えて検索に使う言語(世界の約130言語から)
+    pub search_languages: Vec<String>,
+    /// 集めた記事の見出し・要約を、先頭のレポート言語へ翻訳して併記する
+    pub translate_items: bool,
     pub per_country: u8,
     pub include_news: bool,
     pub include_github: bool,
@@ -80,9 +96,16 @@ pub struct Options {
 /// 収集した1件。
 #[derive(Clone, Debug)]
 pub struct Item {
+    /// 場所の表示名(例: 日本 › 東京都 › 渋谷区)
     pub country: String,
+    /// テーマ / 知りたい情報の名前 / 国の一般情勢
+    pub topic: String,
     pub source: &'static str,
     pub query: String,
+    /// 関連性の判定に使う、この検索の主要な語(テーマまたは知りたい情報の検索語。場所は含めない)
+    pub key: String,
+    pub title_tr: Option<String>,
+    pub snippet_tr: Option<String>,
     pub title: String,
     pub snippet: String,
     pub url: String,
@@ -141,21 +164,6 @@ pub struct Outcome {
     /// 国ごとに実際に使った検索語(英語の国名, 検索語)
     pub queries: Vec<(String, String)>,
     pub millis: f64,
-}
-
-fn country(
-    name: &str,
-) -> Option<(
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-)> {
-    COUNTRIES
-        .iter()
-        .copied()
-        .find(|c| c.0.eq_ignore_ascii_case(name))
 }
 
 /// AI の回答から最初の JSON オブジェクトを取り出す(```json で囲まれていても可)。
@@ -337,9 +345,10 @@ fn brief(theme: &str, items: &[Item]) -> String {
         .map(|(i, it)| {
             let snip: String = it.snippet.chars().take(220).collect();
             format!(
-                "[{}] {} | {} | {} — {}",
+                "[{}] {} | {} | {} | {} — {}",
                 i + 1,
                 it.country,
+                it.topic,
                 it.source,
                 it.title,
                 snip
@@ -368,7 +377,7 @@ fn brief(theme: &str, items: &[Item]) -> String {
         }
     }
     let mut out = format!(
-        "Research theme: {theme}\nItems about the theme (number | country | source | title — snippet):\n{}",
+        "Research theme / topics: {theme}\nItems (number | place | topic | source | title — snippet):\n{}",
         topic.join("\n")
     );
     if !context.is_empty() {
@@ -380,7 +389,13 @@ fn brief(theme: &str, items: &[Item]) -> String {
     out
 }
 
-fn analysis_prompt(brief: &str, lang_code: &str, native: &str, countries: &[String]) -> String {
+fn analysis_prompt(
+    brief: &str,
+    lang_code: &str,
+    native: &str,
+    countries: &[String],
+    extra: &str,
+) -> String {
     format!(
         "You are a senior global market analyst advising companies of every size (large enterprises, SMEs and \
          first-time founders). Analyze ONLY the collected items below.\n\
@@ -396,12 +411,180 @@ fn analysis_prompt(brief: &str, lang_code: &str, native: &str, countries: &[Stri
          Use the general national headlines only as background on each country's situation (economy, politics, risks); \
          never cite them as evidence about the theme itself.\n\
          Rules: cite evidence ONLY by the item numbers shown in brackets (inside text write them as [n] or [n, m]); never write URLs; do not invent facts or numbers \
-         that are not in the items; if the items are insufficient, say so in the summary. Use the English country names \
-         exactly as listed for the sentiment \"country\" field.\n\n{brief}",
+         that are not in the items; if the items are insufficient, say so in the summary. Use the place names \
+         exactly as listed for the sentiment \"country\" field.\n{extra}\n\n{brief}",
         countries.join(", ")
     )
 }
 
+/// Google の表示言語(hl)にする。`languages` の言語コードを小文字にし、中国語だけ地域付きにする。
+fn hl_for(code: &str) -> String {
+    match code {
+        "zh-Hans" => "zh-cn".to_string(),
+        "zh-Hant" => "zh-tw".to_string(),
+        other => other.to_ascii_lowercase(),
+    }
+}
+
+enum Kind {
+    Web,
+    News,
+}
+
+/// 1回の検索。
+struct Job {
+    target: usize,
+    topic: Option<&'static Topic>,
+    lang_ja: &'static str,
+    gl: String,
+    hl: String,
+    query: String,
+    key: String,
+    /// その場所の現地語の検索か(追加の言語ではないか)
+    is_own: bool,
+    kind: Kind,
+}
+
+/// 知りたい情報の検索語を、言語ごとに AI に翻訳させる(日本語・英語は固定の検索語を使う)。
+async fn translate_topics(
+    http: &reqwest::Client,
+    base: &str,
+    topics: &[&Topic],
+    langs: &[&str],
+) -> Result<HashMap<String, HashMap<String, String>>> {
+    let targets: Vec<String> = langs
+        .iter()
+        .filter_map(|l| languages::find(l).map(|(c, _, n)| format!("\"{c}\" ({n})")))
+        .collect();
+    let phrases: Vec<String> = topics
+        .iter()
+        .map(|t| format!("\"{}\": \"{}\"", t.id, t.en))
+        .collect();
+    let prompt = format!(
+        "Translate each English phrase into natural web-search keywords (2-6 words, no commas, no alternatives) for each language.\n\
+         Phrases (id: English): {{{}}}\nLanguages: {}\n\
+         Return ONLY a JSON object of the form {{\"<language code>\": {{\"<id>\": \"<keywords>\"}}}}. No explanations.",
+        phrases.join(", "),
+        targets.join(", ")
+    );
+    let (text, _) = complete(http, base, &prompt).await?;
+    let j = extract_json(&text).ok_or_else(|| anyhow!("翻訳結果を読み取れませんでした"))?;
+    let mut out: HashMap<String, HashMap<String, String>> = HashMap::new();
+    if let Some(o) = j.as_object() {
+        for (lang, m) in o {
+            if let Some(mo) = m.as_object() {
+                let inner = mo
+                    .iter()
+                    .filter_map(|(id, v)| v.as_str().map(|s| (id.clone(), single_query(s))))
+                    .collect();
+                out.insert(lang.clone(), inner);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// 知りたい情報にもとづく、AI への追加の指示(場所ごとの見どころの整理、山の安全上の注意)。
+fn extra_context(topics: &[&Topic]) -> String {
+    if topics.is_empty() {
+        return String::new();
+    }
+    let labels: Vec<&str> = topics.iter().map(|t| t.label).collect();
+    let mut s = format!(
+        "The collected items include local information per place and topic ({}). For each place, summarize what stands out for each \
+         topic (specialties, sights, hot springs, food, lodging, cultural experiences) and turn it into practical proposals for a visitor \
+         or a business: itinerary ideas, what to book in advance, budget points and cautions. When lodging topics are present, compare the \
+         types (cheap highway hotels, business hotels, countryside pensions).",
+        labels.join(", ")
+    );
+    if topics.iter().any(|t| t.id == "mountain") {
+        s.push_str(
+            "\nMOUNTAIN SAFETY: mountain climbing is included (for example Mt. Fuji), so always add to \"risks\" and \"proposals\" a safety \
+             checklist: reserve buses/taxis and mountain huts in advance, check the official climbing season and route/road closures, \
+             prepare for cold even in summer (warm layers such as ski wear, waterproofs), and carry a headlamp and a helmet. Every item that is \
+             NOT taken from the collected items must start with \"General advice:\" and have an empty evidence list. Tell the reader to \
+             confirm current official information before going.",
+        );
+    }
+    s
+}
+
+/// 対象の言語で書かれているように見えるか(見出し・要約を翻訳するかどうかの目安)。
+fn looks_like(lang: &str, text: &str) -> bool {
+    let letters: Vec<char> = text.chars().filter(|c| c.is_alphabetic()).collect();
+    if letters.is_empty() {
+        return true;
+    }
+    let share = |f: fn(char) -> bool| {
+        letters.iter().filter(|c| f(**c)).count() as f64 / letters.len() as f64
+    };
+    match lang {
+        "ja" => {
+            share(|c| {
+                ('\u{3040}'..='\u{30ff}').contains(&c) || ('\u{4e00}'..='\u{9fff}').contains(&c)
+            }) > 0.3
+        }
+        "en" => share(|c| c.is_ascii()) > 0.9,
+        _ => false,
+    }
+}
+
+/// 集めた記事の見出し・要約を、`code` の言語へ翻訳して併記する。すでにその言語のものは翻訳しない。
+/// `@@n@@` 行形式で約2,000文字ごとに分け、4つまで同時に翻訳する。翻訳できた件数を返す。
+async fn translate_items(
+    http: &reqwest::Client,
+    base: &str,
+    items: &mut [Item],
+    code: &str,
+    native: &str,
+) -> Result<usize> {
+    const CHUNK_CHARS: usize = 2_000;
+    let mut src: Vec<(usize, String)> = Vec::new();
+    for (i, it) in items.iter().enumerate() {
+        if it.source == "news" || looks_like(code, &format!("{} {}", it.title, it.snippet)) {
+            continue;
+        }
+        src.push((i * 2 + 1, it.title.chars().take(200).collect()));
+        if !it.snippet.is_empty() {
+            src.push((i * 2 + 2, it.snippet.chars().take(300).collect()));
+        }
+    }
+    if src.is_empty() {
+        return Ok(0);
+    }
+    let mut chunks: Vec<Vec<(usize, String)>> = vec![Vec::new()];
+    let mut size = 0;
+    for item in src {
+        let len = item.1.chars().count();
+        if size + len > CHUNK_CHARS && !chunks.last().unwrap().is_empty() {
+            chunks.push(Vec::new());
+            size = 0;
+        }
+        size += len;
+        chunks.last_mut().unwrap().push(item);
+    }
+    let mut results: Vec<Result<HashMap<usize, String>>> = Vec::new();
+    for group in chunks.chunks(4) {
+        let futs: Vec<_> = group
+            .iter()
+            .map(|c| translate_chunk(http, base, c, code, native))
+            .collect();
+        results.extend(futures::future::join_all(futs).await);
+    }
+    let mut done: HashMap<usize, String> = HashMap::new();
+    for r in results {
+        done.extend(r?);
+    }
+    let mut n = 0;
+    for (i, it) in items.iter_mut().enumerate() {
+        if let Some(t) = done.get(&(i * 2 + 1)) {
+            it.title_tr = Some(t.clone());
+            n += 1;
+        }
+        it.snippet_tr = done.get(&(i * 2 + 2)).cloned();
+    }
+    Ok(n)
+}
 fn parse_analysis(text: &str, n_items: usize) -> Option<Analysis> {
     let j = extract_json(text)?;
     let mut a: Analysis = serde_json::from_value(j).ok()?;
@@ -610,19 +793,34 @@ async fn translate_analysis(
         .collect();
     Ok((with_texts(a, translated), None))
 }
-pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Outcome> {
+pub async fn run(
+    http: &reqwest::Client,
+    base: &str,
+    regions: &RegionData,
+    opt: Options,
+) -> Result<Outcome> {
     let start = Instant::now();
     let theme = opt.theme.trim().to_string();
-    if theme.is_empty() || theme.chars().count() > 200 {
-        bail!("テーマは1〜200文字で入力してください");
+    if theme.chars().count() > 200 {
+        bail!("テーマは200文字までにしてください");
     }
-    if opt.countries.is_empty() || opt.countries.len() > MAX_COUNTRIES {
-        bail!("国・地域は1〜{MAX_COUNTRIES}個選んでください");
+    let topics: Vec<&'static Topic> = opt
+        .topics
+        .iter()
+        .map(|id| {
+            places::topic(id).ok_or_else(|| anyhow!("知りたい情報の指定が正しくありません: {id}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if theme.is_empty() && topics.is_empty() {
+        bail!("テーマを入力するか、知りたい情報にチェックを入れてください");
+    }
+    if opt.places.is_empty() || opt.places.len() > MAX_PLACES {
+        bail!("調べる場所は1〜{MAX_PLACES}か所選んでください");
     }
     let targets = opt
-        .countries
+        .places
         .iter()
-        .map(|c| country(c).ok_or_else(|| anyhow!("対応していない国・地域です: {c}")))
+        .map(|p| places::resolve(p, regions))
         .collect::<Result<Vec<_>>>()?;
     if opt.languages.is_empty() || opt.languages.len() > crate::explain::MAX_LANGUAGES {
         bail!(
@@ -635,77 +833,225 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
         .iter()
         .map(|l| languages::find(l).ok_or_else(|| anyhow!("対応していない言語コードです: {l}")))
         .collect::<Result<Vec<_>>>()?;
+    if opt.search_languages.len() > MAX_EXTRA_LANGS {
+        bail!("追加の検索言語は{MAX_EXTRA_LANGS}個までです");
+    }
+    let mut extra_langs = Vec::new();
+    for l in &opt.search_languages {
+        let f = languages::find(l).ok_or_else(|| anyhow!("対応していない検索言語です: {l}"))?;
+        if !extra_langs.iter().any(|e: &(&str, &str, &str)| e.0 == f.0) {
+            extra_langs.push(f);
+        }
+    }
     let per = opt.per_country.clamp(3, MAX_PER_COUNTRY);
     let mut warnings = Vec::new();
 
-    // 1. テーマの翻訳
+    // 1. 検索の組み立て: 場所 × 検索言語 × (テーマ + 知りたい情報)。回数が多すぎないように数える。
+    // 検索する言語は、その国の言語(現地語)と、追加で選んだ言語。
+    let search_langs_of = |t: &Target| -> Vec<(&'static str, &'static str, String)> {
+        let own = languages::find(t.lang).expect("Target.lang は一覧にある言語");
+        let mut v = vec![(own.0, own.1, t.hl.clone())];
+        for &(code, ja, _) in &extra_langs {
+            if code != own.0 {
+                v.push((code, ja, hl_for(code)));
+            }
+        }
+        v
+    };
+    let planned: usize = targets
+        .iter()
+        .map(|t| search_langs_of(t).len() * (usize::from(!theme.is_empty()) + topics.len()))
+        .sum();
+    if planned > MAX_SEARCHES {
+        bail!(
+            "検索の回数が多すぎます({planned}回、上限{MAX_SEARCHES}回)。場所・知りたい情報・追加の検索言語のどれかを減らしてください"
+        );
+    }
+
+    // 2. テーマと知りたい情報の翻訳(現地語ごと)。日本語・英語の知りたい情報は固定の検索語を使う。
     // GitHub / YouTube は英語で検索するため、英語は常に含める
-    let mut uniq: Vec<&str> = targets.iter().map(|t| t.4).chain(["en"]).collect();
-    uniq.sort_unstable();
-    uniq.dedup();
-    let translated = match translate_theme(http, base, &theme, &uniq).await {
-        Ok(m) => m,
-        Err(e) => {
-            warnings.push(format!(
-                "テーマの翻訳に失敗したため、入力したテーマのまま検索しました({e:#})"
-            ));
-            HashMap::new()
+    let mut need: Vec<&str> = targets
+        .iter()
+        .flat_map(|t| search_langs_of(t).into_iter().map(|x| x.0))
+        .chain(["en"])
+        .collect();
+    need.sort_unstable();
+    need.dedup();
+    let translated = if theme.is_empty() {
+        HashMap::new()
+    } else {
+        match translate_theme(http, base, &theme, &need).await {
+            Ok(m) => m,
+            Err(e) => {
+                warnings.push(format!(
+                    "テーマの翻訳に失敗したため、入力したテーマのまま検索しました({e:#})"
+                ));
+                HashMap::new()
+            }
+        }
+    };
+    let topic_langs: Vec<&str> = need
+        .iter()
+        .copied()
+        .filter(|l| *l != "ja" && *l != "en")
+        .collect();
+    let topic_tr = if topics.is_empty() || topic_langs.is_empty() {
+        HashMap::new()
+    } else {
+        match translate_topics(http, base, &topics, &topic_langs).await {
+            Ok(m) => m,
+            Err(e) => {
+                warnings.push(format!(
+                    "知りたい情報の翻訳に失敗したため、英語の検索語で検索しました({e:#})"
+                ));
+                HashMap::new()
+            }
         }
     };
 
-    // 同じ言語の国を複数選んだ場合は国名を付ける。付けないと検索語が同じになり、検索エンジンが
-    // ほぼ同じ結果を返して重複排除で片方の国の情報が消える(2026-09-24、アメリカとインドで実例)。
-    let queries: Vec<(String, String)> = targets
+    // 3. 検索の一覧を作る
+    let whole_by_lang = |lang: &str| {
+        targets
+            .iter()
+            .filter(|u| u.whole_country && u.lang == lang)
+            .count()
+            > 1
+    };
+    let mut jobs: Vec<Job> = Vec::new();
+    for (ti, t) in targets.iter().enumerate() {
+        for (lang, lang_ja, hl) in search_langs_of(t) {
+            let is_own = lang == t.lang;
+            if !theme.is_empty() {
+                let q = translated
+                    .get(lang)
+                    .cloned()
+                    .unwrap_or_else(|| theme.clone());
+                // 同じ言語の国全体を複数選んだ場合は国名を付ける。付けないと検索語が同じになり、検索エンジンが
+                // ほぼ同じ結果を返して重複排除で片方の国の情報が消える(2026-09-24、アメリカとインドで実例)。
+                let query = if !t.whole_country {
+                    format!("{q} {}", t.place_text)
+                } else if (is_own && whole_by_lang(lang)) || (!is_own && targets.len() > 1) {
+                    format!("{q} {}", t.country_en)
+                } else {
+                    q.clone()
+                };
+                jobs.push(Job {
+                    target: ti,
+                    topic: None,
+                    lang_ja,
+                    gl: t.gl.clone(),
+                    hl: hl.clone(),
+                    query,
+                    key: q,
+                    is_own,
+                    kind: Kind::Web,
+                });
+            }
+            for tp in &topics {
+                let phrase = places::phrase_for(tp, lang, &topic_tr);
+                jobs.push(Job {
+                    target: ti,
+                    topic: Some(tp),
+                    lang_ja,
+                    gl: t.gl.clone(),
+                    hl: hl.clone(),
+                    query: format!("{} {phrase}", t.place_text),
+                    key: phrase,
+                    is_own,
+                    kind: Kind::Web,
+                });
+            }
+        }
+        if opt.include_news && t.whole_country {
+            jobs.push(Job {
+                target: ti,
+                topic: None,
+                lang_ja: "",
+                gl: String::new(),
+                hl: String::new(),
+                query: t.country_en.clone(),
+                key: String::new(),
+                is_own: true,
+                kind: Kind::News,
+            });
+        }
+    }
+    let queries: Vec<(String, String)> = jobs
         .iter()
-        .map(|t| {
-            let q = translated
-                .get(t.4)
-                .cloned()
-                .unwrap_or_else(|| theme.clone());
-            let shared = targets.iter().filter(|u| u.4 == t.4).count() > 1;
-            (
-                t.0.to_string(),
-                if shared { format!("{q} {}", t.0) } else { q },
-            )
+        .filter(|j| matches!(j.kind, Kind::Web))
+        .map(|j| {
+            let t = &targets[j.target];
+            let mut label = t.label.clone();
+            if let Some(tp) = j.topic {
+                label.push_str(&format!(" · {}", tp.label));
+            }
+            if !j.is_own {
+                label.push_str(&format!(" · {}で検索", j.lang_ja));
+            }
+            (label, j.query.clone())
         })
         .collect();
 
-    // 2. 収集(国ごとに並行)
-    let jobs = targets.iter().zip(&queries).map(|(&(name, gl, hl, ja, _), (_, q))| {
-        let q = q.clone();
-        async move {
-            let mut out = Vec::new();
-            let mut warn = Vec::new();
-            let body = serde_json::json!({ "source": "google", "query": q, "max_results": per, "gl": gl, "hl": hl });
-            match search_raw(http, base, body).await {
-                Ok(rs) => out.extend(rs.iter().map(|r| Item {
-                    country: name.into(),
-                    source: "web",
-                    query: q.clone(),
-                    title: s(r, &["title"]),
-                    snippet: s(r, &["snippet"]),
-                    url: s(r, &["link", "url"]),
-                })),
-                Err(e) => warn.push(format!("{ja}の Web 検索に失敗: {e:#}")),
-            }
-            if opt.include_news {
-                match country_news(http, base, name).await {
-                    Ok(rs) => out.extend(rs.iter().take(per as usize).map(|r| Item {
-                        country: name.into(),
-                        source: "news",
-                        query: format!("{name} headlines"),
-                        title: s(r, &["title"]),
-                        snippet: s(r, &["snippet"]),
-                        url: s(r, &["link"]),
-                    })),
-                    Err(e) => warn.push(format!("{ja}のニュース取得に失敗: {e:#}")),
+    // 4. 収集(最大6件を同時に。結果は元の順に並べ直す)
+    let targets_ref = &targets;
+    let mut results: Vec<(usize, Vec<Item>, Option<String>)> = futures::stream::iter(jobs.into_iter().enumerate())
+        .map(|(idx, job)| async move {
+            let t = &targets_ref[job.target];
+            match job.kind {
+                Kind::Web => {
+                    let body = serde_json::json!({ "source": "google", "query": job.query, "max_results": per, "gl": job.gl, "hl": job.hl });
+                    match search_raw(http, base, body).await {
+                        Ok(rs) => {
+                            let items = rs
+                                .iter()
+                                .map(|r| Item {
+                                    country: t.label.clone(),
+                                    topic: job.topic.map_or("テーマ".to_string(), |x| x.label.to_string()),
+                                    source: "web",
+                                    query: job.query.clone(),
+                                    key: job.key.clone(),
+                                    title_tr: None,
+                                    snippet_tr: None,
+                                    title: s(r, &["title"]),
+                                    snippet: s(r, &["snippet"]),
+                                    url: s(r, &["link", "url"]),
+                                })
+                                .collect();
+                            (idx, items, None)
+                        }
+                        Err(e) => (idx, vec![], Some(format!("{} の Web 検索に失敗: {e:#}", t.label))),
+                    }
                 }
+                Kind::News => match country_news(http, base, &t.country_en).await {
+                    Ok(rs) => {
+                        let items = rs
+                            .iter()
+                            .take(per as usize)
+                            .map(|r| Item {
+                                country: t.label.clone(),
+                                topic: "国の一般情勢".into(),
+                                source: "news",
+                                query: format!("{} headlines", t.country_en),
+                                key: String::new(),
+                                title_tr: None,
+                                snippet_tr: None,
+                                title: s(r, &["title"]),
+                                snippet: s(r, &["snippet"]),
+                                url: s(r, &["link"]),
+                            })
+                            .collect();
+                        (idx, items, None)
+                    }
+                    Err(e) => (idx, vec![], Some(format!("{}のニュース取得に失敗: {e:#}", t.label))),
+                },
             }
-            (out, warn)
-        }
-    });
+        })
+        .buffer_unordered(6)
+        .collect()
+        .await;
+    results.sort_by_key(|r| r.0);
     let mut items: Vec<Item> = Vec::new();
-    for (out, warn) in futures::future::join_all(jobs).await {
+    for (_, out, warn) in results {
         items.extend(out);
         warnings.extend(warn);
     }
@@ -720,6 +1066,10 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
         if !flag {
             continue;
         }
+        if theme.is_empty() {
+            warnings.push(format!("テーマが空のため、{src} は検索しませんでした"));
+            continue;
+        }
         match search_raw(
             http,
             base,
@@ -729,8 +1079,12 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
         {
             Ok(rs) => items.extend(rs.iter().map(|r| Item {
                 country: "Global".into(),
+                topic: "テーマ".into(),
                 source: if src == "github" { "github" } else { "youtube" },
                 query: english.clone(),
+                key: english.clone(),
+                title_tr: None,
+                snippet_tr: None,
                 title: s(r, &["full_name", "title"]),
                 snippet: s(r, &["description", "channel_title", "snippet"]),
                 url: s(r, &["url", "link"]),
@@ -741,18 +1095,13 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
     // 同じ URL は1件にまとめる
     let mut seen = std::collections::HashSet::new();
     items.retain(|it| !it.title.is_empty() && (it.url.is_empty() || seen.insert(it.url.clone())));
-    // テーマと無関係な Web 検索結果を除く(ニュースは国の一般情勢として別扱いなので対象外)
+    // テーマ・知りたい情報と無関係な Web 検索結果を除く(その検索の主要な語を含むものだけ残す。
+    // ニュースは国の一般情勢として別扱いなので対象外)
     let before = items.len();
-    let key_tokens: Vec<String> = queries
-        .iter()
-        .map(|(_, q)| q.as_str())
-        .chain([theme.as_str(), english.as_str()])
-        .flat_map(topic_tokens)
-        .collect();
-    items.retain(|it| it.source != "web" || is_relevant(it, &key_tokens));
+    items.retain(|it| it.source != "web" || is_relevant(it, &topic_tokens(&it.key)));
     if items.len() < before {
         warnings.push(format!(
-            "テーマの主要な語を含まない Web 検索結果 {} 件を除外しました",
+            "検索した内容の主要な語を含まない Web 検索結果 {} 件を除外しました",
             before - items.len()
         ));
     }
@@ -762,7 +1111,17 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
         bail!("情報を1件も集められませんでした。{}", warnings.join(" / "));
     }
 
-    // 3. データセット化
+    // 記事の見出し・要約の翻訳版(選んだ場合)。翻訳先は先頭のレポート言語。
+    if opt.translate_items {
+        let (tcode, _, tnative) = langs[0];
+        match translate_items(http, base, &mut items, tcode, tnative).await {
+            Ok(0) => warnings.push("翻訳が必要な記事はありませんでした(すべて同じ言語です)".into()),
+            Ok(_) => {}
+            Err(e) => warnings.push(format!("記事の翻訳に失敗しました({e:#})")),
+        }
+    }
+
+    // 5. データセット化
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -781,9 +1140,12 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
             vec![
                 Some((i + 1).to_string()),
                 Some(it.country.clone()),
+                Some(it.topic.clone()),
                 Some(it.source.to_string()),
                 Some(it.title.clone()),
                 Some(it.snippet.clone()).filter(|s| !s.is_empty()),
+                it.title_tr.clone(),
+                it.snippet_tr.clone(),
                 Some(it.url.clone()).filter(|s| !s.is_empty()),
                 host(&it.url),
                 Some(it.query.clone()),
@@ -794,10 +1156,13 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
     let df = rrd_core::csv::from_records(
         [
             "no",
-            "country",
+            "place",
+            "topic",
             "source",
             "title",
             "snippet",
+            "title_translated",
+            "snippet_translated",
             "url",
             "host",
             "query",
@@ -809,14 +1174,24 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
     )
     .map_err(|e| anyhow!("{e}"))?;
 
-    // 4. 分析(1つ目の言語)→ 5. 他の言語へ翻訳
-    let country_names: Vec<String> = targets.iter().map(|t| t.0.to_string()).collect();
-    let b = brief(&theme, &items);
+    // 6. 分析(1つ目の言語)→ 7. 他の言語へ翻訳
+    let country_names: Vec<String> = targets.iter().map(|t| t.label.clone()).collect();
+    let display_theme = if theme.is_empty() {
+        topics
+            .iter()
+            .map(|t| t.label)
+            .collect::<Vec<_>>()
+            .join("、")
+    } else {
+        theme.clone()
+    };
+    let extra = extra_context(&topics);
+    let b = brief(&display_theme, &items);
     let (code0, ja0, native0) = langs[0];
     let (first, prov0) = analyze(
         http,
         base,
-        &analysis_prompt(&b, code0, native0, &country_names),
+        &analysis_prompt(&b, code0, native0, &country_names, &extra),
         items.len(),
     )
     .await?;
@@ -829,7 +1204,7 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
     let n_items = items.len();
     let rest = langs[1..].iter().map(|&(code, ja, native)| {
         let first = &first;
-        let (b, names) = (&b, &country_names);
+        let (b, names, extra) = (&b, &country_names, &extra);
         async move {
             // 翻訳(内容を揃える)を優先し、失敗したらその言語で直接分析する
             let r = match translate_analysis(http, base, first, code, native).await {
@@ -837,7 +1212,7 @@ pub async fn run(http: &reqwest::Client, base: &str, opt: Options) -> Result<Out
                 Err(e) => analyze(
                     http,
                     base,
-                    &analysis_prompt(b, code, native, names),
+                    &analysis_prompt(b, code, native, names, extra),
                     n_items,
                 )
                 .await
@@ -917,8 +1292,12 @@ mod tests {
         let items: Vec<Item> = (0..200)
             .map(|i| Item {
                 country: "Japan".into(),
+                topic: String::new(),
+                key: String::new(),
                 source: "web",
                 query: "q".into(),
+                title_tr: None,
+                snippet_tr: None,
                 title: format!("title {i}"),
                 snippet: "x".repeat(400),
                 url: format!("https://e.com/{i}"),
@@ -943,8 +1322,12 @@ mod tests {
         assert!(!tokens.contains(&"demand".to_string()));
         let item = |t: &str| Item {
             country: "Japan".into(),
+            topic: String::new(),
+            key: String::new(),
             source: "web",
             query: String::new(),
+            title_tr: None,
+            snippet_tr: None,
             title: t.into(),
             snippet: String::new(),
             url: String::new(),
@@ -959,15 +1342,21 @@ mod tests {
     fn brief_separates_general_headlines() {
         let mk = |src: &'static str, t: &str| Item {
             country: "Japan".into(),
+            topic: String::new(),
+            key: String::new(),
             source: src,
             query: String::new(),
+            title_tr: None,
+            snippet_tr: None,
             title: t.into(),
             snippet: String::new(),
             url: String::new(),
         };
         let b = brief("x", &[mk("web", "A"), mk("news", "B")]);
         let (topic, ctx) = b.split_once("General national headlines").unwrap();
-        assert!(topic.contains("[1] Japan | web | A") && ctx.contains("[2] Japan | news | B"));
+        assert!(
+            topic.contains("[1] Japan |  | web | A") && ctx.contains("[2] Japan |  | news | B")
+        );
     }
 
     #[test]
