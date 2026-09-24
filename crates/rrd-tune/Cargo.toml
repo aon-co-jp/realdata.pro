@@ -1,0 +1,23 @@
+[package]
+name = "rrd-tune"
+description = "realdata.pro 自動性能検査: CPU(SIMD)・GPU・NPU を実測し、処理の種類と大きさごとに最速の経路を選ぶ"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version = "1.89"
+
+[dependencies]
+rrd-render = { path = "../rrd-render" }
+opencuda-core = { path = "../../.deps/open-cuda/crates/opencuda-core" }
+opencuda-cpu = { path = "../../.deps/open-cuda/crates/opencuda-cpu" }
+opencuda-vulkan = { path = "../../.deps/open-cuda/crates/opencuda-vulkan", features = ["real-vulkan"] }
+opencuda-blas = { path = "../../.deps/open-cuda/crates/opencuda-blas" }
+open-cpu = { path = "../../.deps/open-cpu" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+# GEMM 用の Vulkan コンピュートシェーダーを glslc でコンパイルする(open-cuda と同じ方式)
+opencuda-shader-build = { path = "../../.deps/open-cuda/crates/opencuda-shader-build" }

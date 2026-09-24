@@ -15,6 +15,8 @@ path = "src/main.rs"
 rrd-core = { path = "../rrd-core" }
 rrd-compute = { path = "../rrd-compute" }
 rrd-render = { path = "../rrd-render" }
+rrd-tune = { path = "../rrd-tune" }
+opencuda-core = { path = "../../.deps/open-cuda/crates/opencuda-core" }
 base64 = "0.22"
 # RPoem は deps.lock でコミット固定し .deps/ に取得したものを使う(scripts/fetch-deps)。
 open-runo-poem-compat = { path = "../../.deps/RPoem/crates/open-runo-poem-compat" }

@@ -113,6 +113,12 @@ button:disabled{opacity:.5;cursor:progress}
     <div id="invOut"><p class="meta">読み込み中…</p></div>
   </section>
 
+  <section id="tune">
+    <h2>⚙ 性能の自動検査(CPU・GPU・NPU)</h2>
+    <p class="meta">この機器の CPU(AVX-512 / AVX2 など)と GPU を実際に動かして測り、処理の種類と大きさごとに一番速い経路を自動で選びます。GPU の結果が CPU と一致しない場合は、速くても使いません。構成が変わったとき、または7日ごとに自動で検査し直します。</p>
+    <div id="tuneOut"><p class="meta">読み込み中…</p></div>
+  </section>
+
   <section id="jobs">
     <h2>💼 仕事・研修 <span class="meta" lang="en">Jobs &amp; Training</span></h2>
     <div class="cards">
@@ -670,6 +676,72 @@ $('doRegress').onclick = async () => {
 };
 gql('{ computeDevice }').then(d => $('device').textContent = '計算デバイス: ' + d.computeDevice).catch(() => {});
 refresh().catch(showError);
+
+// ───── 性能の自動検査 ─────
+let tuneTimer = null;
+async function loadTune() {
+  let d;
+  try {
+    d = (await gql(`{ computeProfile { running available createdUnix elapsedMs notes
+      cpu { name arch logicalCores features bestSimd }
+      devices { kind name detail usable note }
+      results { workload size backend backendLabel ms ok candidate note }
+      decisions { workload size backend backendLabel ms margin }
+      shares { workload byRuns { backend backendLabel percent } byWork { backend backendLabel percent } }
+      usage { workload backend backendLabel calls totalMs percent } } }`)).computeProfile;
+  } catch (e) { $('tuneOut').innerHTML = ''; $('tuneOut').append(el('p', { className: 'err' }, e.message)); return; }
+  const out = $('tuneOut'); out.innerHTML = '';
+  clearTimeout(tuneTimer); if (d.running) tuneTimer = setTimeout(loadTune, 4000);
+  if (!d.available) { out.append(el('p', { className: 'meta' }, d.running ? '検査中です(初回は数十秒〜数分かかります)…' : 'まだ検査していません。')); addTuneButtons(out, d); return; }
+  if (d.running) out.append(el('p', { className: 'warn' }, '⏳ 検査をやり直しています…(完了すると自動で更新されます)'));
+  // 構成
+  const cards = el('div', { className: 'cards' });
+  const cpuCard = el('div', { className: 'card' }); cpuCard.append(el('h4', {}, 'CPU'), el('p', {}, d.cpu.name || d.cpu.arch), el('p', { className: 'meta' }, `${d.cpu.logicalCores} スレッド ・ 使える命令: ${d.cpu.features.join(' ') || '—'}`), el('p', { className: 'meta' }, `最速の描画経路: ${d.cpu.bestSimd}`)); cards.append(cpuCard);
+  for (const dev of d.devices) { const c = el('div', { className: 'card' }); c.append(el('h4', {}, dev.kind), el('p', {}, dev.name), el('p', { className: 'meta' }, dev.detail), el('p', { className: dev.usable ? 'meta' : 'warn' }, dev.usable ? '✅ 計算に使えます' : `⚠ 割り当てません${dev.note ? ':' + dev.note : ''}`)); cards.append(c); }
+  if (!d.devices.some(x => x.kind === 'GPU' && x.usable)) { const c = el('div', { className: 'card' }); c.append(el('h4', {}, 'GPU'), el('p', { className: 'meta' }, '使える GPU は見つかりませんでした。CPU だけで処理します。')); cards.append(c); }
+  out.append(cards);
+  // 割り当て割合(推奨)
+  out.append(el('h4', {}, '推奨する割り当て(検査結果から計算)'));
+  out.append(el('p', { className: 'meta' }, '「処理の数」は小さい処理も大きい処理も同じ重みで数えた割合、「処理量」は大きい処理を重く見た割合です。'));
+  const sh = el('div', { className: 'charts2' });
+  for (const s of d.shares) {
+    for (const [label, list] of [['処理の数', s.byRuns], ['処理量', s.byWork]]) {
+      const box = el('div'); box.append(el('h4', {}, `${s.workload}(${label}で見た割合)`));
+      const pie = pieChart({ columns: ['経路', '割合'], dtypes: ['str', 'float'], rows: list.map(x => [x.backendLabel, String(x.percent)]) });
+      if (pie) box.append(pie); sh.append(box);
+    }
+  }
+  out.append(sh);
+  // 決定
+  out.append(el('h4', {}, '大きさごとの採用経路'));
+  out.append(simpleTable(['処理', '大きさ', '採用した経路', '時間', '2位との差'], d.decisions.map(x => [x.workload, x.size, x.backendLabel, `${x.ms} ms`, x.margin ? `${x.margin} 倍` : '(候補が1つ)']), [3, 4]));
+  // 実測
+  const det = el('details'); det.append(el('summary', { className: 'meta' }, `すべての実測値(${d.results.length}件)`));
+  det.append(simpleTable(['処理', '大きさ', '経路', '時間', 'CPU と一致', '備考'], d.results.map(x => [x.workload, x.size, x.backendLabel, x.ms == null ? '—' : `${x.ms} ms`, x.candidate ? (x.ok ? '✅' : '✕') : '(参考)', x.note || '']), [3])); out.append(det);
+  // 使用実績
+  out.append(el('h4', {}, '実際の使用実績(選ばれた経路の回数)'));
+  if (!d.usage.length) out.append(el('p', { className: 'meta' }, 'まだ実行されていません。重回帰やグラフ描画を使うと、ここに実績が出ます。'));
+  else out.append(simpleTable(['処理', '経路', '回数', '割合', '合計時間'], d.usage.map(x => [x.workload, x.backendLabel, String(x.calls), `${x.percent}%`, `${x.totalMs} ms`]), [2, 3, 4]));
+  out.append(el('p', { className: 'meta' }, `検査日時: ${fmtTime(d.createdUnix)} ・ 所要 ${(d.elapsedMs / 1000).toFixed(1)} 秒`));
+  for (const n of d.notes) out.append(el('p', { className: 'warn' }, '※ ' + n));
+  addTuneButtons(out, d);
+}
+function addTuneButtons(out, d) {
+  const again = el('button', { className: 'secondary' }, '今すぐ検査し直す'); again.disabled = !!d.running;
+  again.onclick = async () => { again.disabled = true; try { await gql('mutation{ runBenchmark }'); setTimeout(loadTune, 800); } catch (e) { out.append(el('p', { className: 'err' }, e.message)); } };
+  out.append(again);
+  if (d.available) {
+    const lab = el('label'); const cb = el('input', { type: 'checkbox' }); lab.append(cb, ' AI(aruaru-llm)に検査結果(機器の名前と実測値)を送って解説してもらうことに同意します'); out.append(lab);
+    const ex = el('button', {}, 'AI で解説する'); const box = el('div', { className: 'explain' });
+    ex.onclick = async () => {
+      if (!cb.checked) { box.innerHTML = ''; box.append(el('p', { className: 'err' }, '同意にチェックを入れてください')); return; }
+      ex.disabled = true; box.innerHTML = ''; box.append(el('p', { className: 'meta' }, 'AI が解説を作成中です…'));
+      try { const r = await gql('mutation{ explainProfile(consent:true) }'); box.innerHTML = ''; box.append(renderMd(r.explainProfile)); } catch (e) { box.innerHTML = ''; box.append(el('p', { className: 'err' }, e.message)); } finally { ex.disabled = false; }
+    };
+    out.append(ex, box);
+  }
+}
+loadTune();
 
 // ───── 版の記録(aruaru-db)─────
 async function refreshVersions() {

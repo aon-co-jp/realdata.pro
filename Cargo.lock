@@ -2575,8 +2575,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "opencuda-ir"
+version = "0.4.1"
+dependencies = [
+ "anyhow",
+ "opencuda-core",
+ "tracing",
+]
+
+[[package]]
 name = "opencuda-shader-build"
 version = "0.1.0"
+
+[[package]]
+name = "opencuda-vulkan"
+version = "0.4.1"
+dependencies = [
+ "anyhow",
+ "ash",
+ "opencuda-core",
+ "opencuda-ir",
+ "tracing",
+]
 
 [[package]]
 name = "opentelemetry"
@@ -3490,15 +3510,33 @@ dependencies = [
  "futures",
  "http-body-util",
  "open-runo-poem-compat",
+ "opencuda-core",
  "reqwest 0.12.28",
  "rrd-compute",
  "rrd-core",
  "rrd-render",
+ "rrd-tune",
  "scraper",
  "serde",
  "serde_json",
  "tokio",
  "tokio-postgres",
+]
+
+[[package]]
+name = "rrd-tune"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "open-cpu",
+ "opencuda-blas",
+ "opencuda-core",
+ "opencuda-cpu",
+ "opencuda-shader-build",
+ "opencuda-vulkan",
+ "rrd-render",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

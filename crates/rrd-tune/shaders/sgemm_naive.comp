@@ -1,0 +1,38 @@
+#version 450
+
+// v0.4.0: 最小のnaive matmulシェーダ。タイリング等の最適化はしない。
+// 正確性優先方針(DEVELOPMENT-NEXT.md)のため、まずは素朴な3重ループ相当を1スレッド1出力要素で実装する。
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer A {
+    float a[];
+};
+
+layout(set = 0, binding = 1) readonly buffer B {
+    float b[];
+};
+
+layout(set = 0, binding = 2) writeonly buffer C {
+    float c[];
+};
+
+layout(push_constant) uniform Params {
+    uint m;
+    uint k;
+    uint n;
+} params;
+
+void main() {
+    uint col = gl_GlobalInvocationID.x;
+    uint row = gl_GlobalInvocationID.y;
+    if (row >= params.m || col >= params.n) {
+        return;
+    }
+
+    float acc = 0.0;
+    for (uint kk = 0u; kk < params.k; kk++) {
+        acc += a[row * params.k + kk] * b[kk * params.n + col];
+    }
+    c[row * params.n + col] = acc;
+}

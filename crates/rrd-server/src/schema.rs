@@ -29,6 +29,8 @@ pub struct AppState {
     pub data_dir: std::path::PathBuf,
     /// aruaru-db による永続化・版管理(RRD_DB_DSN 未設定なら None)
     pub store: Option<crate::store::Store>,
+    /// 自動性能検査(CPU / GPU の実測と経路の選択)
+    pub tune: crate::tuning::TuneState,
 }
 
 impl AppState {
@@ -37,16 +39,22 @@ impl AppState {
         llm_base: String,
         data_dir: std::path::PathBuf,
     ) -> AppState {
+        let deposits = crate::deposits::load(&data_dir);
+        let tune = crate::tuning::TuneState {
+            profile: RwLock::new(crate::tuning::load_profile(&data_dir)),
+            ..Default::default()
+        };
         AppState {
             datasets: RwLock::new(HashMap::new()),
             device,
             http: reqwest::Client::new(),
             llm_base,
             market: RwLock::new(Default::default()),
-            deposits: RwLock::new(crate::deposits::load(&data_dir)),
+            deposits: RwLock::new(deposits),
             deposits_running: std::sync::atomic::AtomicBool::new(false),
             data_dir,
             store: None,
+            tune,
         }
     }
 }
@@ -374,10 +382,50 @@ impl QueryRoot {
         target: String,
         features: Vec<String>,
     ) -> Result<Regression> {
-        let device = state(ctx).device.clone();
+        let st = state(ctx);
+        let cpu = st.device.clone();
         with_dataset(ctx, &name, |df| {
             let feats: Vec<&str> = features.iter().map(String::as_str).collect();
-            let fit = rrd_compute::ols(&*device, df, &target, &feats).map_err(err)?;
+            // 処理の大きさ(行列積 k×m · m×k の m×k×k)から、実測に基づいて CPU / GPU を選ぶ
+            let k = (feats.len() + 1) as f64;
+            let work = df.height() as f64 * k * k;
+            let route = crate::tuning::route(st, rrd_tune::Workload::Gemm, work);
+            let gpu = match route {
+                rrd_tune::Route::Gpu(i) => st.tune.gpus.read().map_err(err_poison)?.get(i).cloned(),
+                rrd_tune::Route::Cpu => None,
+            };
+            let started = std::time::Instant::now();
+            let (fit, used_gpu) = match &gpu {
+                Some(g) => {
+                    match rrd_compute::ols_with(
+                        &**g,
+                        Some(rrd_tune::SGEMM_SPIRV),
+                        df,
+                        &target,
+                        &feats,
+                    ) {
+                        Ok(f) => (f, true),
+                        // GPU で失敗したら CPU に切り替える(結果は同じ)。理由はログに残す。
+                        Err(e) => {
+                            eprintln!("realdata.pro: GPU での重回帰に失敗したため CPU で計算します: {e:#}");
+                            (
+                                rrd_compute::ols(&*cpu, df, &target, &feats).map_err(err)?,
+                                false,
+                            )
+                        }
+                    }
+                }
+                None => (
+                    rrd_compute::ols(&*cpu, df, &target, &feats).map_err(err)?,
+                    false,
+                ),
+            };
+            let ms = started.elapsed().as_secs_f64() * 1000.0;
+            let (id, device_name) = match (&gpu, used_gpu) {
+                (Some(g), true) => (route.id(), g.info().name.clone()),
+                _ => ("cpu".to_string(), cpu.info().name.clone()),
+            };
+            st.tune.record(&format!("gemm/{id}"), ms);
             Ok(Regression {
                 target: fit.target,
                 features: fit.features,
@@ -385,7 +433,7 @@ impl QueryRoot {
                 coefficients: fit.coefficients,
                 r_squared: fit.r_squared,
                 n: fit.n,
-                device: device.info().name.clone(),
+                device: device_name,
             })
         })
     }
@@ -426,8 +474,17 @@ impl QueryRoot {
             ChartKind::Pie => rrd_render::pie_mesh(&values, width, height)
                 .ok_or_else(|| Error::new("円グラフは、0以上で合計が正の値にだけ使えます"))?,
         };
+        let st = state(ctx);
         let backend = match backend {
-            RenderBackend::Auto => rrd_render::Backend::Auto,
+            // 自動: 実測で速かった経路を使う。GPU が速い場合も、使えなければ CPU に切り替わる。
+            RenderBackend::Auto => match crate::tuning::route(
+                st,
+                rrd_tune::Workload::Raster,
+                f64::from(width) * f64::from(height),
+            ) {
+                rrd_tune::Route::Cpu => rrd_render::Backend::Cpu,
+                rrd_tune::Route::Gpu(_) => rrd_render::Backend::Auto,
+            },
             RenderBackend::Gpu => rrd_render::Backend::Gpu,
             RenderBackend::Cpu => rrd_render::Backend::Cpu,
         };
@@ -437,6 +494,17 @@ impl QueryRoot {
                 .await
                 .map_err(|e| Error::new(format!("描画処理が異常終了しました: {e}")))?
                 .map_err(Error::new)?;
+        st.tune.record(
+            &format!(
+                "raster/{}",
+                if r.backend.starts_with("CPU") {
+                    "cpu"
+                } else {
+                    "gpu0"
+                }
+            ),
+            r.millis,
+        );
         use base64::Engine as _;
         Ok(ChartImage {
             png_base64: base64::engine::general_purpose::STANDARD.encode(&r.png),
@@ -486,6 +554,11 @@ impl QueryRoot {
                 created_unix: v.created_unix,
             })
             .collect())
+    }
+
+    /// 自動性能検査の結果(構成・実測・決定・割り当て割合・使用実績)。
+    async fn compute_profile(&self, ctx: &Context<'_>) -> crate::tuning::ProfileView {
+        crate::tuning::view(state(ctx))
     }
 
     /// 世界リサーチの対象にできる国・地域。
@@ -816,6 +889,60 @@ impl MutationRoot {
             .ok_or_else(|| Error::new("その版にはこのデータセットがありません"))?;
         let df = rrd_core::csv::read_csv_str(&csv).map_err(err)?;
         store_dataset(ctx, into, df)
+    }
+
+    /// 性能検査をやり直す(裏で数十秒〜数分かかる。実行中は受け付けない)。
+    async fn run_benchmark(&self, ctx: &Context<'_>) -> Result<String> {
+        let st = state(ctx).clone();
+        if st.tune.running.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok("検査中です。しばらくしてから画面を更新してください".into());
+        }
+        tokio::spawn(crate::tuning::ensure_profile(st, true));
+        Ok("性能検査を開始しました".into())
+    }
+
+    /// 性能検査の結果を AI(aruaru-llm)が日本語で解説する。数値は AI へ送るが、機微な情報は含まない。
+    async fn explain_profile(&self, ctx: &Context<'_>, consent: bool) -> Result<String> {
+        if !consent {
+            return Err(Error::new(
+                "AI に検査結果(機器の名前と実測値)を送ることへの同意が必要です",
+            ));
+        }
+        let st = state(ctx);
+        let p = st
+            .tune
+            .profile
+            .read()
+            .map_err(err_poison)?
+            .clone()
+            .ok_or_else(|| Error::new("性能検査の結果がまだありません"))?;
+        let mut prompt = rrd_tune::explain_prompt(&p);
+        // aruaru-llm 自身が認識しているアクセラレータ(NPU など)も添える
+        if let Ok(resp) = st
+            .http
+            .get(format!(
+                "{}/v1/accelerators",
+                st.llm_base.trim_end_matches('/')
+            ))
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
+            if let Ok(j) = resp.json::<serde_json::Value>().await {
+                prompt.push_str(&format!(
+                    "\naruaru-llm が認識している構成: {}\n",
+                    j.get("inventory").map_or(String::new(), |v| v
+                        .to_string()
+                        .chars()
+                        .take(1200)
+                        .collect())
+                ));
+            }
+        }
+        let (text, _) = crate::explain::complete(&st.http, &st.llm_base, &prompt)
+            .await
+            .map_err(|e| Error::new(format!("{e:#}")))?;
+        Ok(text)
     }
 
     /// 外貨定期預金の金利をすぐに収集し直す(毎朝の自動収集とは別に)。

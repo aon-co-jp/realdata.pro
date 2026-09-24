@@ -43,7 +43,13 @@ impl OlsFit {
 }
 
 /// 行優先の行列 A (m×k) に対して AᵀA (k×k) を open-cuda の sgemm で計算する。
-fn gram(device: &dyn GpuDevice, a: &[f32], m: usize, k: usize) -> Result<Vec<f32>> {
+fn gram(
+    device: &dyn GpuDevice,
+    spirv: Option<&[u8]>,
+    a: &[f32],
+    m: usize,
+    k: usize,
+) -> Result<Vec<f32>> {
     // Aᵀ を明示的に作って sgemm(k×m · m×k)に渡す。
     let mut at = vec![0f32; k * m];
     for i in 0..m {
@@ -52,7 +58,7 @@ fn gram(device: &dyn GpuDevice, a: &[f32], m: usize, k: usize) -> Result<Vec<f32
         }
     }
     let mut c = vec![0f32; k * k];
-    opencuda_blas::sgemm(device, k, m, k, 1.0, &at, a, 0.0, &mut c, None)
+    opencuda_blas::sgemm(device, k, m, k, 1.0, &at, a, 0.0, &mut c, spirv)
         .context("opencuda-blas sgemm (AᵀA) に失敗")?;
     Ok(c)
 }
@@ -91,6 +97,17 @@ fn solve(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> Result<Vec<f64>> {
 /// y ~ 切片 + Σ bᵢ xᵢ の最小二乗(正規方程式)。欠損を含む行は除外する。
 pub fn ols(
     device: &dyn GpuDevice,
+    df: &DataFrame,
+    target: &str,
+    features: &[&str],
+) -> Result<OlsFit> {
+    ols_with(device, None, df, target, features)
+}
+
+/// `ols` の、Vulkan の GEMM シェーダー(SPIR-V)を指定できる版。GPU で計算するときに `spirv` を渡す。
+pub fn ols_with(
+    device: &dyn GpuDevice,
+    spirv: Option<&[u8]>,
     df: &DataFrame,
     target: &str,
     features: &[&str],
@@ -134,7 +151,7 @@ pub fn ols(
         }
         a[r * k + p] = (val(ycol, i) - ymean) as f32;
     }
-    let g = gram(device, &a, m, k)?;
+    let g = gram(device, spirv, &a, m, k)?;
     let xtx: Vec<f64> = (0..p)
         .flat_map(|r| (0..p).map(move |c| (r, c)))
         .map(|(r, c)| g[r * k + c] as f64)

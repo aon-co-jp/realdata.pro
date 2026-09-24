@@ -22,6 +22,7 @@ mod market;
 mod research;
 mod schema;
 mod store;
+mod tuning;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -137,6 +138,7 @@ async fn main() -> std::io::Result<()> {
     let state = Arc::new(state);
     println!("realdata.pro: 計算デバイス = {}", state.device.info().name);
     tokio::spawn(schedule(state.clone()));
+    tokio::spawn(tuning::ensure_profile(state.clone(), false));
     let schema = build_schema(state);
 
     let (addr, handle) = Server::new(TcpListener::bind(bind))
@@ -157,6 +159,10 @@ async fn schedule(state: Arc<AppState>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(300)).await;
         let now = market::now_unix();
+        // 検査結果が古くなったら(7日)自動で再検査する
+        if tuning::is_stale(&state) {
+            tokio::spawn(tuning::ensure_profile(state.clone(), false));
+        }
         if now.saturating_sub(last_market) >= 3 * 3600 {
             schema::refresh_market(&state).await;
             last_market = now;
