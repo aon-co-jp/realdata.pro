@@ -17,6 +17,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # open-cuda の opencuda-blas はビルド時に glslc(Vulkan SDK のシェーダーコンパイラ)を使う
+      - name: Install glslc (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y glslc
+      - name: Install glslc (Windows, Vulkan SDK)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install vulkan-sdk -y --no-progress
+          $bin = Get-ChildItem C:\VulkanSDK -Directory | Sort-Object Name -Descending | Select-Object -First 1 | ForEach-Object { Join-Path $_.FullName 'Bin' }
+          if (-not (Test-Path (Join-Path $bin 'glslc.exe'))) { throw "glslc.exe が見つかりません: $bin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
       # deps.lock に固定したエコシステムの兄弟リポジトリを .deps/ に取得する
       - name: Fetch pinned ecosystem deps
         shell: bash
