@@ -321,6 +321,42 @@ pub const TOPICS: &[Topic] = &[
         ja: "産業観光 見学 酒蔵 茶畑 酪農 工房 職人",
         en: "industrial tourism visits breweries tea farms dairy workshops artisans",
     },
+    Topic {
+        id: "sake_tour",
+        label: "見学: 日本酒の酒蔵・蔵見学",
+        ja: "酒蔵 見学 蔵開き 試飲 日本酒",
+        en: "sake brewery tours tasting",
+    },
+    Topic {
+        id: "whisky_tour",
+        label: "見学: ウイスキー蒸溜所見学",
+        ja: "ウイスキー 蒸溜所 見学 ツアー 試飲",
+        en: "whisky distillery tours tasting",
+    },
+    Topic {
+        id: "wine_tour",
+        label: "見学: ワイナリー・ぶどう農家見学",
+        ja: "ワイナリー 見学 ぶどう畑 ワイン 試飲 ぶどう農家",
+        en: "winery tours vineyard visits grape farms tasting",
+    },
+    Topic {
+        id: "beer_tour",
+        label: "見学: ビール工場・醸造所見学",
+        ja: "ビール工場 見学 醸造所 ツアー 試飲",
+        en: "brewery tours beer factory visits tasting",
+    },
+    Topic {
+        id: "producer_tour",
+        label: "見学: 生産農家・生産者(お茶・果樹・酪農・醸造原料など)",
+        ja: "生産者 農家 見学 直売 収穫 体験 茶園 果樹園 牧場",
+        en: "farm and producer visits tea plantation orchard dairy ranch",
+    },
+    Topic {
+        id: "similar_tour",
+        label: "見学: 焼酎・泡盛・味噌・醤油・チーズ・お茶などの製造所",
+        ja: "焼酎 泡盛 味噌 醤油 チーズ 製茶 工場 見学",
+        en: "tours of shochu awamori miso soy sauce cheese tea factories",
+    },
 ];
 
 /// 知りたい情報の検索語。日本語・英語は固定、それ以外は翻訳結果(無ければ英語)。
