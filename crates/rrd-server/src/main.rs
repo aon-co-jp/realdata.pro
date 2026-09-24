@@ -15,6 +15,7 @@
 mod explain;
 mod ingest;
 mod languages;
+mod research;
 mod schema;
 
 use std::collections::HashMap;

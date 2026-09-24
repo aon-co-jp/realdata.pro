@@ -92,6 +92,53 @@ fn prompt_for(brief: &str, code: &str, native: &str) -> String {
     )
 }
 
+/// aruaru-llm(無料 AI を優先順・ハイブリッドで使う `complete-priority`)に1回問い合わせ、
+/// (回答, AI 名)を返す。
+pub async fn complete(
+    http: &reqwest::Client,
+    llm_base: &str,
+    prompt: &str,
+) -> Result<(String, Option<String>)> {
+    let url = format!(
+        "{}/v1/chat-providers/complete-priority",
+        llm_base.trim_end_matches('/')
+    );
+    let resp = http
+        .post(&url)
+        .json(&serde_json::json!({ "prompt": prompt }))
+        .timeout(Duration::from_secs(150))
+        .send()
+        .await
+        .with_context(|| format!("aruaru-llm({llm_base})に接続できません"))?;
+    let status = resp.status();
+    let j: Json = resp.json().await.context("aruaru-llm の応答を読めません")?;
+    if !status.is_success() {
+        bail!(
+            "aruaru-llm がエラーを返しました: {}",
+            j.get("error").and_then(Json::as_str).unwrap_or("不明")
+        );
+    }
+    let reply = j.get("reply").filter(|r| !r.is_null()).ok_or_else(|| {
+        if j.get("all_quota_exceeded").and_then(Json::as_bool) == Some(true) {
+            anyhow!("利用できる AI がすべて上限に達しています。時間をおいて再度お試しください")
+        } else {
+            anyhow!("AI から回答を得られませんでした(aruaru-llm に AI のキーが設定されているか確認してください)")
+        }
+    })?;
+    Ok((
+        reply
+            .get("text")
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        reply.get("provider").map(|p| {
+            p.as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| p.to_string())
+        }),
+    ))
+}
+
 /// 指定言語それぞれで説明を得る(言語ごとに並行して aruaru-llm を呼ぶ)。
 pub async fn explain(
     http: &reqwest::Client,
@@ -110,40 +157,14 @@ pub async fn explain(
             resolved.push((code, ja, native));
         }
     }
-    let url = format!(
-        "{}/v1/chat-providers/complete-priority",
-        llm_base.trim_end_matches('/')
-    );
-    let calls = resolved.iter().map(|(code, ja, native)| {
-        let body = serde_json::json!({ "prompt": prompt_for(brief, code, native) });
-        let url = url.clone();
-        async move {
-            let resp = http
-                .post(&url)
-                .json(&body)
-                .timeout(Duration::from_secs(120))
-                .send()
-                .await
-                .with_context(|| format!("aruaru-llm({llm_base})に接続できません"))?;
-            let status = resp.status();
-            let j: Json = resp.json().await.context("aruaru-llm の応答を読めません")?;
-            if !status.is_success() {
-                bail!("aruaru-llm がエラーを返しました: {}", j.get("error").and_then(Json::as_str).unwrap_or("不明"));
-            }
-            let reply = j.get("reply").filter(|r| !r.is_null()).ok_or_else(|| {
-                if j.get("all_quota_exceeded").and_then(Json::as_bool) == Some(true) {
-                    anyhow!("利用できる AI がすべて上限に達しています。時間をおいて再度お試しください")
-                } else {
-                    anyhow!("AI から回答を得られませんでした(aruaru-llm に AI のキーが設定されているか確認してください)")
-                }
-            })?;
-            Ok(Explanation {
-                lang: code.to_string(),
-                language_name: ja.to_string(),
-                text: reply.get("text").and_then(Json::as_str).unwrap_or_default().to_string(),
-                provider: reply.get("provider").map(|p| p.as_str().map(str::to_string).unwrap_or_else(|| p.to_string())),
-            })
-        }
+    let calls = resolved.iter().map(|(code, ja, native)| async move {
+        let (text, provider) = complete(http, llm_base, &prompt_for(brief, code, native)).await?;
+        Ok(Explanation {
+            lang: code.to_string(),
+            language_name: ja.to_string(),
+            text,
+            provider,
+        })
     });
     futures::future::join_all(calls).await.into_iter().collect()
 }

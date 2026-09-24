@@ -48,5 +48,12 @@ cargo run -p rrd-server        # http://127.0.0.1:4701/
   - キーは aruaru-llm の設定を正本として共有する(PORTING.md「API キーの共有」)。
   - GitHub 検索・URL 取り込み・SSRF 拒否・3言語の説明は、ブラウザで確認済み。
   - Google 検索は、開発機のキーでは 403 だった。VPS で要確認。
+- **2026-09-24 続き2**:
+  - P4(open-directx の GPU 描画+AVX-512/AVX2 の CPU ラスタライザ)を実装した。
+    開発機では GPU と CPU の出力が完全一致した。AVX-512 の経路は VPS(Xeon Icelake)で、スカラーと画素単位で一致した。
+  - 世界リサーチ(`research.rs`)を実装し、実データで7回の開発・テスト・デバッグを行った(PORTING.md に記録)。
+  - aruaru-llm に `/v1/search/raw` の `gl`/`hl` 対応を追加し、VPS に反映済み。
+  - CI は `F:\git.txt` のトークンで push した(このトークンは workflow 権限付き。値は表示・保存しない)。
+  - realdata.pro のサーバー自体は、まだ VPS にデプロイしていない(DNS の設定待ち)。
 - realdata.pro は、作成時点で DNS の委任が完了していない(レジストリに NS が未登録、ConoHa DNS にゾーンが未作成)。
 - `.github/workflows/ci.yml` は、gh トークンに `workflow` 権限が付くまで push できない。

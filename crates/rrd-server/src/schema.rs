@@ -388,6 +388,17 @@ impl QueryRoot {
         })
     }
 
+    /// 世界リサーチの対象にできる国・地域。
+    async fn research_countries(&self) -> Vec<ResearchCountry> {
+        crate::research::COUNTRIES
+            .iter()
+            .map(|(name, _, _, ja, _)| ResearchCountry {
+                name: name.to_string(),
+                name_ja: ja.to_string(),
+            })
+            .collect()
+    }
+
     /// 説明に使える言語の一覧(世界の主要な約130言語)。
     async fn languages(&self) -> Vec<Language> {
         crate::languages::LANGUAGES
@@ -442,6 +453,106 @@ pub struct ChartImage {
     pub backend: String,
     /// GPU を使えず CPU に切り替えた理由。
     pub fallback_reason: Option<String>,
+    pub millis: f64,
+}
+
+#[derive(SimpleObject)]
+pub struct ResearchCountry {
+    /// 英語名(API で指定する値)
+    pub name: String,
+    pub name_ja: String,
+}
+
+#[derive(InputObject)]
+pub struct ResearchInput {
+    /// 保存するデータセット名
+    pub name: String,
+    /// 調べたいテーマ(例: 「電気自動車の充電インフラ」)
+    pub theme: String,
+    /// 対象の国・地域(英語名、1〜6)
+    pub countries: Vec<String>,
+    #[graphql(default = 5)]
+    pub per_country: u8,
+    #[graphql(default = true)]
+    pub include_news: bool,
+    #[graphql(default)]
+    pub include_github: bool,
+    #[graphql(default)]
+    pub include_youtube: bool,
+    /// レポートの言語(1〜3、先頭の言語で分析し、残りは翻訳)
+    pub languages: Vec<String>,
+    /// テーマと集めた公開情報を AI へ送ることへの同意
+    pub consent: bool,
+}
+
+/// 根拠(収集した記事)へのリンク。番号はデータセットの `no` 列と同じ。
+#[derive(SimpleObject, Clone)]
+pub struct Evidence {
+    pub no: usize,
+    pub title: String,
+    pub url: Option<String>,
+    pub country: String,
+}
+
+#[derive(SimpleObject)]
+pub struct FindingOut {
+    pub title: String,
+    pub detail: String,
+    pub countries: Vec<String>,
+    pub evidence: Vec<Evidence>,
+}
+
+#[derive(SimpleObject)]
+pub struct ProposalOut {
+    pub action: String,
+    pub why: String,
+    pub priority: String,
+    pub evidence: Vec<Evidence>,
+}
+
+#[derive(SimpleObject)]
+pub struct SentimentOut {
+    pub country: String,
+    pub score: f64,
+    pub reason: String,
+}
+
+#[derive(SimpleObject)]
+pub struct ResearchReport {
+    pub lang: String,
+    pub language_name: String,
+    pub summary: String,
+    pub trends: Vec<FindingOut>,
+    pub opportunities: Vec<FindingOut>,
+    pub risks: Vec<FindingOut>,
+    pub proposals: Vec<ProposalOut>,
+    pub sentiment: Vec<SentimentOut>,
+    pub provider: Option<String>,
+}
+
+#[derive(SimpleObject)]
+pub struct QueryUsed {
+    pub country: String,
+    pub query: String,
+}
+
+#[derive(SimpleObject)]
+pub struct CountEntry {
+    pub label: String,
+    pub count: usize,
+}
+
+#[derive(SimpleObject)]
+pub struct ResearchResult {
+    pub dataset: DatasetInfo,
+    /// 国ごとに実際に使った検索語
+    pub queries: Vec<QueryUsed>,
+    /// 集めた記事の一覧(番号は本文中の [n] と同じ)
+    pub items: Vec<Evidence>,
+    pub reports: Vec<ResearchReport>,
+    pub by_country: Vec<CountEntry>,
+    pub by_source: Vec<CountEntry>,
+    pub warnings: Vec<String>,
     pub millis: f64,
 }
 
@@ -531,6 +642,124 @@ impl MutationRoot {
         Ok(ImportResult {
             dataset: store(ctx, name, im.df)?,
             method: im.method,
+        })
+    }
+
+    /// 世界リサーチ: テーマについて各国の情報を集め、AI(aruaru-llm の無料 AI)で分析・提案する。
+    /// 集めた記事はデータセット `name` として保存し、ほかの分析にも使える。
+    async fn research(&self, ctx: &Context<'_>, input: ResearchInput) -> Result<ResearchResult> {
+        if !input.consent {
+            return Err(Error::new(
+                "テーマと集めた公開情報を AI へ送ることへの同意が必要です",
+            ));
+        }
+        check_name(&input.name)?;
+        let st = state(ctx);
+        let out = crate::research::run(
+            &st.http,
+            &st.llm_base,
+            crate::research::Options {
+                theme: input.theme,
+                countries: input.countries,
+                per_country: input.per_country,
+                include_news: input.include_news,
+                include_github: input.include_github,
+                include_youtube: input.include_youtube,
+                languages: input.languages,
+            },
+        )
+        .await
+        .map_err(|e| Error::new(format!("{e:#}")))?;
+        let ev = |nums: &[usize]| -> Vec<Evidence> {
+            nums.iter()
+                .filter_map(|&n| out.items.get(n - 1).map(|it| (n, it)))
+                .map(|(n, it)| Evidence {
+                    no: n,
+                    title: it.title.clone(),
+                    url: Some(it.url.clone()).filter(|u| !u.is_empty()),
+                    country: it.country.clone(),
+                })
+                .collect()
+        };
+        let findings = |fs: &[crate::research::Finding]| -> Vec<FindingOut> {
+            fs.iter()
+                .map(|f| FindingOut {
+                    title: f.title.clone(),
+                    detail: f.detail.clone(),
+                    countries: f.countries.clone(),
+                    evidence: ev(&f.evidence),
+                })
+                .collect()
+        };
+        let reports = out
+            .reports
+            .iter()
+            .map(|r| ResearchReport {
+                lang: r.lang.clone(),
+                language_name: r.language_name.clone(),
+                summary: r.analysis.summary.clone(),
+                trends: findings(&r.analysis.trends),
+                opportunities: findings(&r.analysis.opportunities),
+                risks: findings(&r.analysis.risks),
+                proposals: r
+                    .analysis
+                    .proposals
+                    .iter()
+                    .map(|p| ProposalOut {
+                        action: p.action.clone(),
+                        why: p.why.clone(),
+                        priority: p.priority.clone(),
+                        evidence: ev(&p.evidence),
+                    })
+                    .collect(),
+                sentiment: r
+                    .analysis
+                    .sentiment
+                    .iter()
+                    .map(|s| SentimentOut {
+                        country: s.country.clone(),
+                        score: s.score,
+                        reason: s.reason.clone(),
+                    })
+                    .collect(),
+                provider: r.provider.clone(),
+            })
+            .collect();
+        let (by_country, by_source) = crate::research::counts(&out.items);
+        let to_entries = |m: std::collections::BTreeMap<String, usize>| {
+            let mut v: Vec<CountEntry> = m
+                .into_iter()
+                .map(|(label, count)| CountEntry { label, count })
+                .collect();
+            v.sort_by_key(|e| std::cmp::Reverse(e.count));
+            v
+        };
+        Ok(ResearchResult {
+            items: out
+                .items
+                .iter()
+                .enumerate()
+                .map(|(i, it)| Evidence {
+                    no: i + 1,
+                    title: it.title.clone(),
+                    url: Some(it.url.clone()).filter(|u| !u.is_empty()),
+                    country: it.country.clone(),
+                })
+                .collect(),
+            queries: out
+                .queries
+                .iter()
+                .map(|(c, q)| QueryUsed {
+                    country: c.clone(),
+                    query: q.clone(),
+                })
+                .collect(),
+            dataset: store(ctx, input.name, out.df)?,
+            reports,
+            by_country: to_entries(by_country),
+            by_source: to_entries(by_source),
+            warnings: out.warnings,
+            millis: out.millis,
         })
     }
 
