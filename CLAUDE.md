@@ -55,5 +55,13 @@ cargo run -p rrd-server        # http://127.0.0.1:4701/
   - aruaru-llm に `/v1/search/raw` の `gl`/`hl` 対応を追加し、VPS に反映済み。
   - CI は `F:\git.txt` のトークンで push した(このトークンは workflow 権限付き。値は表示・保存しない)。
   - realdata.pro のサーバー自体は、まだ VPS にデプロイしていない(DNS の設定待ち)。
-- realdata.pro は、作成時点で DNS の委任が完了していない(レジストリに NS が未登録、ConoHa DNS にゾーンが未作成)。
+- **2026-09-24 続き3**:
+  - VPS にデプロイ済み: https://realdata.pro/(`realdata-pro.service`、`127.0.0.1:4701`、open-web-server の背後、Let's Encrypt)。
+    DNS は a.conoha-dns.com / b.conoha-dns.org で反映済み。
+  - 全ドメインの certbot 更新が失敗していた障害を修正した(open-web-server の `CLAUDE.md` に詳細)。
+  - 起業・企業向けサービス(サンプル)、資金運用の公的データ、外貨定期預金金利の毎朝7時の自動収集、求人リンクを追加した。
+  - P2(aruaru-db による保存・版管理)を実装し、VPS では専用の aruaru-db(`realdata-aruaru-db.service`)で稼働している。
+  - aruaru-db の INSERT 解析の実バグを発見した(値内の `,` `)` 引用符)。別作業に切り出し、こちらは Base64 で回避している。
+  - 未実施: YouTube のキー、open-directx のデスクトップビューア、GPU バックエンド(VPS には GPU が無い)。
+- realdata.pro は、作成時点で DNS の委任が完了していない(→ 上記のとおり解消済み)(レジストリに NS が未登録、ConoHa DNS にゾーンが未作成)。
 - `.github/workflows/ci.yml` は、gh トークンに `workflow` 権限が付くまで push できない。

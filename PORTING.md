@@ -68,9 +68,14 @@
   値の中の `,` `)` 引用符を区別しないため、CSV のような文字列を保存できない
   (「INSERT: 3 columns but 5 values」)。realdata.pro は値を Base64 にして回避している。aruaru-db 側の修正は別作業として切り出した。
 - aruaru-db のパラメータは文字列として扱われるため、日時も TEXT で保存する(BIGINT の束縛は失敗した)。
-- **VPS の aruaru-db は `ARUARU_USERS` が未設定で、誰も pgwire にログインできない状態**(2026-09-24 確認、
-  journal に警告が出ている)。VPS で版管理を使うには、専用ユーザーを設定して aruaru-server を再起動する必要がある
-  (本番 DB の再起動を伴うため、ユーザーの了承を得てから行う)。
+- **VPS の本番 aruaru-db は `ARUARU_USERS` が未設定で、誰も pgwire にログインできない状態**(2026-09-24 確認、
+  journal に警告が出ている)。本番 DB の認証を変えて再起動すると他のサイトにも影響するため、
+  **realdata.pro 専用の aruaru-db を別プロセス**で起動している(2026-09-24)。
+  - サービス: `realdata-aruaru-db.service`(`/root/aruaru-db/target/release/aruaru-server` を別のデータ・別のポートで起動)。
+    データは `/root/repository/realdata.pro/data/aruaru-db`、pgwire は `15433`、GraphQL は `14001`。
+  - 認証情報は VPS 上で生成し、root だけが読めるファイル(`.env.aruaru-db`・`.env.realdata`、権限 600、Git 管理外)にだけある。
+  - ポート 15433 / 14001 は `0.0.0.0` で待ち受けるが、ファイアウォール(firewalld)が遮断している(外部から届かないことを確認済み)。
+  - VPS で通しの確認済み: 保存 → 版の記録 → 変更 → 再度保存 → 過去の版の再現 → 削除。
 - ローカルの検証は、`aruaru-server --pg-port 15433 …` を `ARUARU_USERS=rrd:<検証用パスワード>` で起動し、
   `RRD_TEST_DSN` を設定して `cargo test -p rrd-server store` を実行する(未設定なら省略される)。
 
