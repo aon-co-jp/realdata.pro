@@ -1,6 +1,6 @@
 # 自リポジトリのクレートだけを整形・検査する別名。
 # `cargo fmt --all` は .deps/ 配下のパス依存先まで整形してしまうため使わない。
 [alias]
-fmt-own = "fmt -p rrd-core -p rrd-compute -p rrd-server -p rrd-cli"
-lint-own = "clippy --all-targets -p rrd-core -p rrd-compute -p rrd-server -p rrd-cli -- -D warnings"
-test-own = "test -p rrd-core -p rrd-compute -p rrd-server -p rrd-cli"
+fmt-own = "fmt -p rrd-core -p rrd-compute -p rrd-render -p rrd-server -p rrd-cli"
+lint-own = "clippy --all-targets -p rrd-core -p rrd-compute -p rrd-render -p rrd-server -p rrd-cli -- -D warnings"
+test-own = "test -p rrd-core -p rrd-compute -p rrd-render -p rrd-server -p rrd-cli"

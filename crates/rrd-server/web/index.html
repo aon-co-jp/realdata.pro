@@ -113,7 +113,7 @@ button:disabled{opacity:.5;cursor:progress}
       <div class="row">
         <div><label for="gKey">キー列</label><select id="gKey"></select></div>
         <div><label>集計(列と関数)</label><div class="aggs" id="aggs"></div><button class="secondary" id="addAgg">＋ 集計を追加</button></div>
-        <div><label for="chartType">グラフ(1つ目の集計を表示)</label><select id="chartType"><option value="bar">棒グラフ</option><option value="pie">円グラフ</option><option value="">表示しない</option></select></div>
+        <div><label for="chartType">グラフ(1つ目の集計を表示)</label><select id="chartType"><option value="bar">棒グラフ</option><option value="pie">円グラフ</option><option value="gbar">棒グラフ(GPU/CPU で画像描画)</option><option value="gpie">円グラフ(GPU/CPU で画像描画)</option><option value="">表示しない</option></select></div>
       </div>
       <button id="doGroup">集計</button>
     </div>
@@ -383,8 +383,24 @@ $('doGroup').onclick = async () => {
     const t = (await gql('query($n:String!,$k:String!,$a:[AggInput!]!){ groupBy(name:$n, key:$k, aggs:$a){ columns dtypes rows totalRows } }', { n: current?.name ?? '', k: $('gKey').value, a: aggs })).groupBy;
     renderTable(t);
     const kind = $('chartType').value;
-    const c = kind === 'bar' ? barChart(t) : kind === 'pie' ? pieChart(t) : null;
-    if (c) $('out').append(c);
+    if (kind === 'gbar' || kind === 'gpie') {
+      const w = Math.min(1200, Math.max(320, Math.round($('out').clientWidth || 640))), h = kind === 'gpie' ? Math.min(w, 480) : Math.round(w * 0.5);
+      const r = (await gql('query($n:String!,$k:String!,$a:AggInput!,$c:ChartKind!,$w:Int!,$h:Int!){ renderChart(name:$n, key:$k, agg:$a, kind:$c, width:$w, height:$h){ pngBase64 width height backend fallbackReason millis } }',
+        { n: current?.name ?? '', k: $('gKey').value, a: aggs[0], c: kind === 'gpie' ? 'PIE' : 'BAR', w, h })).renderChart;
+      const img = el('img', { src: 'data:image/png;base64,' + r.pngBase64, width: r.width, height: r.height, alt: `${t.columns[1]} のグラフ` });
+      img.style.maxWidth = '100%'; img.style.height = 'auto'; img.style.borderRadius = '6px'; img.style.border = '1px solid var(--line)';
+      $('out').append(img);
+      if (kind === 'gpie') { // 画像には文字を描かないため、凡例は HTML で出す
+        const total = t.rows.reduce((s, row) => s + (Number(row[1]) || 0), 0);
+        const ul = el('ul', { className: 'meta' });
+        t.rows.forEach((row, i) => { const li = el('li'); const sw = el('span', {}, '■ '); sw.style.color = PIE_COLORS[i % PIE_COLORS.length]; li.append(sw, `${row[0] ?? 'null'}: ${fmt(String(row[1]), true)}(${total ? (Number(row[1]) / total * 100).toFixed(1) : 0}%)`); ul.append(li); });
+        $('out').append(ul);
+      }
+      $('out').append(el('p', { className: 'meta' }, `描画: ${r.backend} ・ ${r.millis.toFixed(1)} ms` + (r.fallbackReason ? `(GPU を使えなかったため CPU で描画: ${r.fallbackReason})` : '')));
+    } else {
+      const c = kind === 'bar' ? barChart(t) : kind === 'pie' ? pieChart(t) : null;
+      if (c) $('out').append(c);
+    }
   } catch (e) { showError(e); }
 };
 $('doCleanse').onclick = async () => {

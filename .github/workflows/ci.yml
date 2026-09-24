@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      # deps.lock に固定したエコシステムの兄弟リポジトリを .deps/ に取得する
+      - name: Fetch pinned ecosystem deps
+        shell: bash
+        run: bash scripts/fetch-deps.sh
+      # 自リポジトリのクレートだけを検査する(依存先は整形しない)
+      - run: cargo fmt-own -- --check
+      - run: cargo lint-own
+      - run: cargo test-own
+      # 設計ガード: ビルド・検査が依存先リポジトリを一切変更していないこと
+      - name: Dependencies must stay untouched
+        shell: bash
+        run: |
+          for d in .deps/*/; do
+            if [ -n "$(git -C "$d" status --porcelain)" ]; then
+              echo "::error::$d が変更されています"; git -C "$d" status --short; exit 1
+            fi
+          done

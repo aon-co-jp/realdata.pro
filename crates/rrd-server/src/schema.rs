@@ -140,7 +140,7 @@ impl From<AggFn> for Agg {
     }
 }
 
-#[derive(InputObject)]
+#[derive(InputObject, Clone)]
 pub struct AggInput {
     pub column: String,
     pub func: AggFn,
@@ -335,6 +335,59 @@ impl QueryRoot {
         state(ctx).device.info().name.clone()
     }
 
+    /// 集計結果のグラフを画像(PNG)で描く。open-directx(GPU)で描き、GPU が無ければ
+    /// AVX-512 / AVX2 の CPU ラスタライザで描く。文字(ラベル・凡例)は画像に含めない。
+    #[allow(clippy::too_many_arguments)]
+    async fn render_chart(
+        &self,
+        ctx: &Context<'_>,
+        name: String,
+        key: String,
+        agg: AggInput,
+        kind: ChartKind,
+        #[graphql(default = 640)] width: u32,
+        #[graphql(default = 360)] height: u32,
+        #[graphql(default_with = "RenderBackend::Auto")] backend: RenderBackend,
+    ) -> Result<ChartImage> {
+        let values: Vec<f64> = with_dataset(ctx, &name, |df| {
+            let g = df
+                .group_by(&key, &[(agg.column.as_str(), agg.func.into())])
+                .map_err(err)?;
+            let col = &g.columns()[1];
+            Ok((0..g.height())
+                .map(|i| col.get(i).as_f64().unwrap_or(f64::NAN))
+                .collect())
+        })?;
+        if values.len() > 1000 {
+            return Err(Error::new("グラフにできる項目は1000件までです"));
+        }
+        let mesh = match kind {
+            ChartKind::Bar => rrd_render::bar_mesh(&values, width, height),
+            ChartKind::Pie => rrd_render::pie_mesh(&values, width, height)
+                .ok_or_else(|| Error::new("円グラフは、0以上で合計が正の値にだけ使えます"))?,
+        };
+        let backend = match backend {
+            RenderBackend::Auto => rrd_render::Backend::Auto,
+            RenderBackend::Gpu => rrd_render::Backend::Gpu,
+            RenderBackend::Cpu => rrd_render::Backend::Cpu,
+        };
+        // GPU 初期化・ラスタライズは重い同期処理なので、非同期実行スレッドを塞がない。
+        let r =
+            tokio::task::spawn_blocking(move || rrd_render::render(&mesh, width, height, backend))
+                .await
+                .map_err(|e| Error::new(format!("描画処理が異常終了しました: {e}")))?
+                .map_err(Error::new)?;
+        use base64::Engine as _;
+        Ok(ChartImage {
+            png_base64: base64::engine::general_purpose::STANDARD.encode(&r.png),
+            width: r.width,
+            height: r.height,
+            backend: r.backend,
+            fallback_reason: r.fallback_reason,
+            millis: r.millis,
+        })
+    }
+
     /// 説明に使える言語の一覧(世界の主要な約130言語)。
     async fn languages(&self) -> Vec<Language> {
         crate::languages::LANGUAGES
@@ -364,6 +417,32 @@ fn store(ctx: &Context<'_>, name: String, df: DataFrame) -> Result<DatasetInfo> 
     let info = DatasetInfo::of(&name, &df);
     map.insert(name, df);
     Ok(info)
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+pub enum ChartKind {
+    Bar,
+    Pie,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+pub enum RenderBackend {
+    /// GPU を試し、使えなければ CPU(AVX-512 / AVX2 / スカラー)。
+    Auto,
+    Gpu,
+    Cpu,
+}
+
+#[derive(SimpleObject)]
+pub struct ChartImage {
+    pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
+    /// 実際に使った描画経路(例: "GPU(open-directx / Vulkan): NVIDIA GeForce GT 730")。
+    pub backend: String,
+    /// GPU を使えず CPU に切り替えた理由。
+    pub fallback_reason: Option<String>,
+    pub millis: f64,
 }
 
 #[derive(SimpleObject)]

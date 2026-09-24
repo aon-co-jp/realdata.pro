@@ -1,0 +1,4 @@
+# Linux の CI / VPS で読むファイルは改行を LF に固定する
+*.sh text eol=lf
+deps.lock text eol=lf
+*.yml text eol=lf

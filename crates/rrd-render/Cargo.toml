@@ -1,0 +1,16 @@
+[package]
+name = "rrd-render"
+description = "realdata.pro グラフ描画: open-directx(Vulkan)で GPU 描画し、GPU が無ければ AVX-512 / AVX2 の CPU ラスタライザで描く"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# AVX-512 intrinsics の安定化(Rust 1.89)以降が必要
+rust-version = "1.89"
+
+[dependencies]
+# open-directx / open-cpu は deps.lock でコミット固定し .deps/ に取得したものを使う(scripts/fetch-deps)。
+directx-graphics-vulkan = { path = "../../.deps/open-directx/crates/directx-graphics-vulkan" }
+directx-shader-translate = { path = "../../.deps/open-directx/crates/directx-shader-translate" }
+open-cpu = { path = "../../.deps/open-cpu" }
+png = "0.17"

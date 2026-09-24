@@ -29,10 +29,25 @@
 | P1.5 | 取り込み元の追加: 検索ワード(Google / YouTube / GitHub、aruaru-llm `POST /v1/search/raw` 経由)、調査対象 URL(CSV・JSON・HTML の表・リンク一覧、SSRF 対策付き) | ✅ 2026-09-24 |
 | P3 | aruaru-llm 連携: 分析結果を日本語・英語と、約130言語から選んだ1言語で説明する(同意必須、生データは既定で送らない) | ✅ 2026-09-24 |
 | P2 | aruaru-db 連携: データセットの保存・読込、`commit()` で分析の版を記録し、`AS OF COMMIT` で再現する | 次 |
-| P4 | open-directx 連携: GPU でグラフを描画する。GPU が無い環境では、open-cpu の実行時 CPU 判定を使い、AVX-512・AVX2 など、その CPU で使える最速の SIMD 命令で描画する(サーバー側 PNG、デスクトップビューア) | |
+| P4 | open-directx 連携: GPU(Vulkan)でグラフ(棒・円)を PNG に描く。GPU が無い環境では、open-cpu の実行時判定で AVX-512(16画素並列)/ AVX2(8画素並列)/ スカラーの CPU ラスタライザで描く(`rrd-render`、GraphQL `renderChart`) | ✅ 2026-09-24(デスクトップビューアは未着手) |
 | P5 | realdata.pro 公開: open-web-server を前段(TLS/ACME・ドメイン振り分け)にして VPS で運用する | |
 | P6 | 日付型・join・ピボット・Parquet、ロジスティック回帰・決定木・k-means | |
 | P7 | GPU バックエンド(Vulkan/DirectX)での GEMM、複数ノード分散 | |
+
+## グラフ描画(P4、2026-09-24)
+
+- グラフは三角形メッシュにしてから描く(棒: 背景・目盛り線・軸・棒の四角形。円: 1度あたり1分割以上の扇形)。
+  縦横2倍で描いてから 2×2 平均で縮小し、ジャギーを抑える。文字(ラベル・凡例)は画像に含めず、画面側の HTML で出す。
+- **GPU**: open-directx `render_indexed_scene_with_depth_and_read_back`(Vulkan オフスクリーン)を使う。
+  シェーダーは open-directx 同梱の `triangle_vs/ps.dxbc` を `directx-shader-translate` で SPIR-V に変換して使う。
+  深度で「後に描いた三角形が手前」になるようにし、CPU 経路の後勝ちと同じ見え方にしている。
+- **CPU**: エッジ関数によるラスタライザ。スカラー版と SIMD 版で計算の順序と丸めを揃えている
+  (行定数 `B·y+C` を先に求め、FMA は使わない)。
+- 検証結果(2026-09-24):
+  - 開発機(Ryzen 9 3950X / GeForce GT 730): GPU と CPU の出力が**完全一致**(約28万画素中、差は0画素)。
+    AVX2 とスカラーの出力も画素単位で一致した。
+  - AVX-512 の経路は VPS(Xeon Icelake)で検証する(下の HANDOFF 参照)。
+- `RRD_SIMD=avx2|scalar` で下位の経路に固定できる(比較・切り分け用)。
 
 ## API キーの共有(2026-09-24)
 

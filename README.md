@@ -20,7 +20,7 @@
 | 検索ワードからの取り込み(Google / YouTube / GitHub) | [aruaru-llm](https://github.com/aon-co-jp/aruaru-llm) `POST /v1/search/raw` | ✅ |
 | 調査対象 URL からの取り込み(CSV・JSON・HTML の表) | 本リポジトリ(SSRF 対策付き) | ✅ |
 | AI による分析の説明(日本語・英語と約130言語から選択) | [aruaru-llm](https://github.com/aon-co-jp/aruaru-llm) | ✅ |
-| グラフ描画 | 棒グラフ・円グラフ(ブラウザ SVG)/ GPU 描画は [open-directx](https://github.com/aon-co-jp/open-directx) | ✅ 棒・円 / 🔜 GPU |
+| グラフ描画 | 棒・円グラフ(ブラウザ SVG)と、[open-directx](https://github.com/aon-co-jp/open-directx)(Vulkan)による GPU 描画。GPU が無ければ AVX-512 / AVX2 の CPU 描画 | ✅ |
 
 ## SAS Viya の特徴との対応
 
