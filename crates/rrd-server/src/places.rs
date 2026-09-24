@@ -267,6 +267,18 @@ pub const TOPICS: &[Topic] = &[
         ja: "食品加工 食品メーカー 加工食品",
         en: "food processing industry",
     },
+    Topic {
+        id: "defense_space",
+        label: "防衛: 日本製の人工衛星・AI衛星(軌道上の画像化など)",
+        ja: "日本製 AI衛星 人工衛星 軌道上 画像化",
+        en: "Japanese made AI satellites artificial satellites on-orbit imaging",
+    },
+    Topic {
+        id: "defense_missile",
+        label: "防衛: ミサイル・迎撃・レールガン・レーザー(ICBMなど)",
+        ja: "ICBM 大陸間弾道ミサイル 迎撃 防衛 レールガン レーザー",
+        en: "ICBM missile defense interception railgun laser weapons",
+    },
 ];
 
 /// 知りたい情報の検索語。日本語・英語は固定、それ以外は翻訳結果(無ければ英語)。

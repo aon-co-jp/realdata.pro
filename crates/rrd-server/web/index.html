@@ -161,6 +161,12 @@ button:disabled{opacity:.5;cursor:progress}
     <div id="rPlaces" class="chips" aria-live="polite"></div>
     <label>知りたい情報(チェックした項目を、場所ごとに検索します)</label>
     <div id="rTopics" class="chips"></div>
+    <div id="defNote" class="note" hidden><strong>🛰 防衛・宇宙の参考動画(YouTube):</strong>
+      <a href="https://www.youtube.com/results?search_query=%E6%97%A5%E6%9C%AC%E8%A3%BD%E3%80%80AI%E8%A1%9B%E6%98%9F" target="_blank" rel="noopener noreferrer">日本製 AI衛星</a> ·
+      <a href="https://www.youtube.com/shorts/3m6QXmKhYl4" target="_blank" rel="noopener noreferrer">世界最強の防空網でも止められないインドの核ミサイル</a> ·
+      <a href="https://www.youtube.com/results?search_query=%E6%97%A5%E6%9C%AC%E8%A3%BD%E3%80%80ICBM%E3%80%80%E4%BA%BA%E5%B7%A5%E8%A1%9B%E6%98%9F" target="_blank" rel="noopener noreferrer">日本製 ICBM 人工衛星</a> ·
+      <a href="https://www.youtube.com/results?search_query=ICBM%E3%80%80%E5%A4%A7%E9%99%B8%E5%BC%BE%E9%81%93%E5%BC%BE%E3%83%9F%E3%82%B5%E3%82%A4%E3%83%AB%E3%80%80%E8%BF%8E%E6%92%83%E3%80%80%E9%98%B2%E8%A1%9B%E3%80%80%E3%83%AC%E3%83%BC%E3%83%AB%E3%82%AC%E3%83%B3%E3%80%80%E3%83%AC%E3%83%BC%E3%82%B6%E3%83%BC" target="_blank" rel="noopener noreferrer">ICBM 迎撃 防衛 レールガン レーザー</a> ·
+      <a href="https://www.youtube.com/results?search_query=%E6%97%A5%E6%9C%AC%E8%A3%BD%E3%80%80%E4%BA%BA%E5%B7%A5%E8%A1%9B%E6%98%9F%E3%80%80%E7%BF%BC%E3%80%80%E8%BB%8C%E9%81%93%E4%B8%8A%E3%81%A7%E7%94%BB%E5%83%8F%E5%8C%96" target="_blank" rel="noopener noreferrer">日本製 人工衛星 翼 軌道上で画像化</a></div>
     <div id="mtNote" class="note" hidden><strong>⛰ 山・登山の注意:</strong> 富士山などは、バス・タクシーは事前予約、山小屋は必ず予約してください。1年中寒い冬山のため、上下のスキーウェア(防寒・防水)と、ライト付きヘルメットがおすすめです。<span class="meta">(検索結果に加えた一般的な安全上の注意です。出典のある情報ではありません)</span></div>
     <div class="row" style="margin-top:8px">
       <div><label for="rPer">1つの検索あたりの件数</label><select id="rPer"><option>3</option><option selected>5</option><option>8</option><option>10</option></select></div>
@@ -582,7 +588,7 @@ $('pAdd').onclick = () => {
 gql('{ researchTopics { id label } }').then(d => {
   for (const tp of d.researchTopics) {
     const lab = el('label'); const cb = el('input', { type: 'checkbox', value: tp.id });
-    cb.onchange = () => { $('mtNote').hidden = !$('rTopics').querySelector('input[value=mountain]').checked; };
+    cb.onchange = () => { const on = (v) => $('rTopics').querySelector(`input[value=${v}]`).checked; $('mtNote').hidden = !on('mountain'); $('defNote').hidden = !(on('defense') || on('defense_space') || on('defense_missile')); };
     lab.append(cb, tp.label); $('rTopics').append(lab);
   }
 }).catch(() => {});
