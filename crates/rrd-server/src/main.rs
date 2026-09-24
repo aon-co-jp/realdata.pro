@@ -14,6 +14,7 @@
 //! - `RRD_DATA_DIR`  収集結果の保存先(既定 data)
 //! - `RRD_ARUARU_LLM_URL`  aruaru-llm の URL(既定 http://127.0.0.1:4600、検索取り込みと AI 説明に使う)
 
+mod crawl;
 mod deposits;
 mod explain;
 mod ingest;
@@ -142,6 +143,7 @@ async fn main() -> std::io::Result<()> {
     tokio::spawn(schedule(state.clone()));
     tokio::spawn(tuning::ensure_profile(state.clone(), false));
     tokio::spawn(load_regions(state.clone()));
+    crawl::load_latest(&state);
     let schema = build_schema(state);
 
     let (addr, handle) = Server::new(TcpListener::bind(bind))
@@ -179,6 +181,9 @@ async fn schedule(state: Arc<AppState>) {
         let (ly, lm, ld, _) = market::jst(last);
         if hour >= 7 && (last == 0 || (ly, lm, ld) != (y, m, d)) {
             tokio::spawn(schema::run_deposit_collection(state.clone()));
+        }
+        if hour >= 7 && crawl::is_due(&state) {
+            tokio::spawn(crawl::run_daily(state.clone()));
         }
     }
 }

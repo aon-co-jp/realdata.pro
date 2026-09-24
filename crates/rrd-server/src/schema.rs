@@ -1131,6 +1131,7 @@ impl MutationRoot {
                 include_github: input.include_github,
                 include_youtube: input.include_youtube,
                 languages: input.languages,
+                analyze: true,
             },
         )
         .await

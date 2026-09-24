@@ -357,6 +357,90 @@ pub const TOPICS: &[Topic] = &[
         ja: "焼酎 泡盛 味噌 醤油 チーズ 製茶 工場 見学",
         en: "tours of shochu awamori miso soy sauce cheese tea factories",
     },
+    Topic {
+        id: "stream_fishing",
+        label: "体験: 渓流釣り",
+        ja: "渓流釣り 釣り場 遊漁券 体験",
+        en: "stream fishing trout fishing spots permits",
+    },
+    Topic {
+        id: "shellfish_tour",
+        label: "体験: 潮干狩りツアー",
+        ja: "潮干狩り ツアー 予約 干潟",
+        en: "clam digging shellfish gathering tours",
+    },
+    Topic {
+        id: "mushroom_picking",
+        label: "体験: きのこ狩り",
+        ja: "きのこ狩り 農園 体験 予約",
+        en: "mushroom picking experience farms",
+    },
+    Topic {
+        id: "mushroom_factory",
+        label: "見学: きのこ工場見学",
+        ja: "きのこ工場 見学 しいたけ 栽培 農場",
+        en: "mushroom factory farm tours",
+    },
+    Topic {
+        id: "pc_class",
+        label: "学ぶ: パソコン教室",
+        ja: "パソコン教室 初心者 スクール",
+        en: "computer classes for beginners",
+    },
+    Topic {
+        id: "claude_class",
+        label: "学ぶ: Claude(AI)体験教室",
+        ja: "Claude 体験教室 生成AI 体験 セミナー AI講座",
+        en: "Claude AI hands-on workshop generative AI classes",
+    },
+    Topic {
+        id: "construction_training",
+        label: "育成: 建設職人の育成・訓練校",
+        ja: "建設職人 育成 職業訓練 建設技能 訓練校",
+        en: "construction craftsman training vocational school",
+    },
+    Topic {
+        id: "construction_site_tour",
+        label: "見学: 建設現場見学",
+        ja: "建設現場 見学会 現場見学 ゼネコン",
+        en: "construction site tours",
+    },
+    Topic {
+        id: "carpenter",
+        label: "育成: 大工職人(弟子入り・大工育成)",
+        ja: "大工職人 育成 弟子入り 大工 求人 修行",
+        en: "carpenter training apprenticeship",
+    },
+    Topic {
+        id: "carpenter_site_tour",
+        label: "見学: 大工の現場見学・工房見学",
+        ja: "大工 現場見学 上棟 工務店 見学会 工房",
+        en: "carpenter site visits woodworking workshop tours",
+    },
+    Topic {
+        id: "facility_mgmt_training",
+        label: "育成: 施設管理職の育成・資格",
+        ja: "施設管理 育成 ビルメンテナンス 資格 研修",
+        en: "facility management training qualifications",
+    },
+    Topic {
+        id: "facility_mgmt_fire",
+        label: "施設管理(消防設備を含む)",
+        ja: "消防設備 点検 施設管理 消防設備士 ビル管理",
+        en: "facility management including fire safety equipment inspection",
+    },
+    Topic {
+        id: "job_construction",
+        label: "求人: 工務店・建設会社(大工・現場・施工管理)",
+        ja: "工務店 建設会社 求人 大工 施工管理 現場 募集",
+        en: "construction company and home builder job openings carpenter site manager",
+    },
+    Topic {
+        id: "job_facility",
+        label: "求人: 施設管理・ビルメンテナンス(消防設備含む)",
+        ja: "施設管理 ビルメンテナンス 消防設備 求人 募集",
+        en: "facility management building maintenance fire equipment job openings",
+    },
 ];
 
 /// 知りたい情報の検索語。日本語・英語は固定、それ以外は翻訳結果(無ければ英語)。

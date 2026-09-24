@@ -91,6 +91,8 @@ pub struct Options {
     pub include_github: bool,
     pub include_youtube: bool,
     pub languages: Vec<String>,
+    /// false なら集めるだけ(AI の分析・翻訳をしない。毎朝の自動収集用)
+    pub analyze: bool,
 }
 
 /// 収集した1件。
@@ -822,7 +824,9 @@ pub async fn run(
         .iter()
         .map(|p| places::resolve(p, regions))
         .collect::<Result<Vec<_>>>()?;
-    if opt.languages.is_empty() || opt.languages.len() > crate::explain::MAX_LANGUAGES {
+    if opt.analyze
+        && (opt.languages.is_empty() || opt.languages.len() > crate::explain::MAX_LANGUAGES)
+    {
         bail!(
             "説明の言語は1〜{}個選んでください",
             crate::explain::MAX_LANGUAGES
@@ -1174,6 +1178,16 @@ pub async fn run(
     )
     .map_err(|e| anyhow!("{e}"))?;
 
+    if !opt.analyze {
+        return Ok(Outcome {
+            items,
+            df,
+            reports: Vec::new(),
+            warnings,
+            queries,
+            millis: start.elapsed().as_secs_f64() * 1000.0,
+        });
+    }
     // 6. 分析(1つ目の言語)→ 7. 他の言語へ翻訳
     let country_names: Vec<String> = targets.iter().map(|t| t.label.clone()).collect();
     let display_theme = if theme.is_empty() {
