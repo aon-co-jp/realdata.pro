@@ -279,6 +279,48 @@ pub const TOPICS: &[Topic] = &[
         ja: "ICBM 大陸間弾道ミサイル 迎撃 防衛 レールガン レーザー",
         en: "ICBM missile defense interception railgun laser weapons",
     },
+    Topic {
+        id: "factory_tour",
+        label: "見学: 工場見学",
+        ja: "工場見学 予約 無料",
+        en: "factory tours visitor tours booking",
+    },
+    Topic {
+        id: "company_tour",
+        label: "見学: 会社見学・企業訪問",
+        ja: "会社見学 企業見学 訪問 受け入れ",
+        en: "company visits corporate tours for visitors",
+    },
+    Topic {
+        id: "aquaculture_tour",
+        label: "見学: 魚介類の養殖・漁業体験",
+        ja: "養殖 見学 漁業体験 水産",
+        en: "aquaculture fish farm visits fishing experience",
+    },
+    Topic {
+        id: "strawberry_farm",
+        label: "見学: いちご農家・いちご狩り",
+        ja: "いちご農家 いちご狩り 見学",
+        en: "strawberry farms strawberry picking",
+    },
+    Topic {
+        id: "farm_experience",
+        label: "体験: 農業体験",
+        ja: "農業体験 農家 収穫体験 受け入れ",
+        en: "farm experience agritourism harvest",
+    },
+    Topic {
+        id: "forestry_experience",
+        label: "体験: 林業体験",
+        ja: "林業体験 森林 伐採 体験 見学",
+        en: "forestry experience forest work visits",
+    },
+    Topic {
+        id: "industry_tour",
+        label: "見学: 産業別の見学(酒蔵・茶畑・酪農・職人の工房など)",
+        ja: "産業観光 見学 酒蔵 茶畑 酪農 工房 職人",
+        en: "industrial tourism visits breweries tea farms dairy workshops artisans",
+    },
 ];
 
 /// 知りたい情報の検索語。日本語・英語は固定、それ以外は翻訳結果(無ければ英語)。
