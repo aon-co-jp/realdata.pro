@@ -122,6 +122,11 @@ pub struct Options {
     pub free_only: bool,
     /// 公開の地図データ(OpenStreetMap)も引くか(大量の自動収集では引かない)
     pub use_osm: bool,
+    /// 検索と検索の間を空ける時間(ミリ秒)。0 なら空けず、6件を同時に検索する。
+    /// 大量に自動収集するときは、検索元に機械利用を疑われて制限されないよう、1件ずつ間を空けて行う
+    pub pace_ms: u64,
+    /// 検索語を最初の2語に短くする(語が多いと、検索元が一部の語しか反映しないことがあるため)
+    pub short_queries: bool,
 }
 
 /// 収集した1件。
@@ -985,6 +990,15 @@ pub async fn run(
             }
             for tp in &topics {
                 let phrase = places::phrase_for(tp, lang, &topic_tr);
+                let phrase = if opt.short_queries {
+                    phrase
+                        .split_whitespace()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                } else {
+                    phrase
+                };
                 jobs.push(Job {
                     target: ti,
                     topic: Some(tp),
@@ -1054,6 +1068,8 @@ pub async fn run(
     crate::osm::preload(&osm_needs).await;
     // 4. 収集(最大6件を同時に。結果は元の順に並べ直す)
     let free_only = opt.free_only;
+    let pace = std::time::Duration::from_millis(opt.pace_ms);
+    let concurrency = if opt.pace_ms > 0 { 1 } else { 6 };
     let targets_ref = &targets;
     let mut results: Vec<(usize, Vec<Item>, Option<String>)> = futures::stream::iter(jobs.into_iter().enumerate())
         .map(|(idx, job)| async move {
@@ -1062,6 +1078,13 @@ pub async fn run(
                 Kind::Web => {
                     let body = serde_json::json!({ "source": "google", "query": job.query, "max_results": per, "gl": job.gl, "hl": job.hl, "free_only": free_only });
                     let got = search_raw(http, base, body).await;
+                    if !pace.is_zero() {
+                        // 一定の間隔だと機械と見分けられやすいので、ゆらぎ(0.6〜1.4倍)を付ける
+                        let n = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |t| t.subsec_nanos());
+                        tokio::time::sleep(pace * (600 + n % 800) / 1000).await;
+                    }
                     if std::env::var("RRD_DEBUG_SEARCH").is_ok() {
                         match &got {
                             Ok(rs) => eprintln!("realdata.pro[debug]: 検索 {:?} → {} 件", job.query, rs.len()),
@@ -1146,7 +1169,7 @@ pub async fn run(
                 },
             }
         })
-        .buffer_unordered(6)
+        .buffer_unordered(concurrency)
         .collect()
         .await;
     results.sort_by_key(|r| r.0);

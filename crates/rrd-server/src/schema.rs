@@ -1128,6 +1128,8 @@ impl MutationRoot {
                 analyze: true,
                 free_only: false,
                 use_osm: true,
+                pace_ms: 0,
+                short_queries: false,
             },
         )
         .await

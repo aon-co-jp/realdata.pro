@@ -51,6 +51,11 @@ pub const TOPICS: &[&str] = &[
 const DEFAULT_SEARCHES_PER_DAY: usize = 20;
 /// 毎朝の自動収集が1日に使う検索の上限(日中の世界リサーチのために、合計の上限3,000件のうち500件を残す)
 const MAX_SEARCHES_PER_DAY: usize = 2_500;
+/// 無料検索のときの、1日の既定の検索の組の数。検索元に負担をかけすぎないよう、上限より少なくする
+/// (2026-09-25 実測: 1日に約1,300件を1時間で行うと Brave・Yahoo! JAPAN に拒否され、Bing も検索語の一部しか反映しなくなった)
+const DEFAULT_FREE_SEARCHES_PER_DAY: usize = 600;
+/// 無料検索のときの、検索と検索の間隔(ミリ秒)
+const CRAWL_PACE_MS: u64 = 12_000;
 /// 保管庫を使わないときに、手元へ残す日数
 const KEEP_DAYS: usize = 7;
 
@@ -84,7 +89,7 @@ fn searches_per_day(free_available: bool) -> usize {
         return n.clamp(1, MAX_SEARCHES_PER_DAY);
     }
     if free_available {
-        MAX_SEARCHES_PER_DAY
+        DEFAULT_FREE_SEARCHES_PER_DAY
     } else {
         DEFAULT_SEARCHES_PER_DAY
     }
@@ -237,6 +242,9 @@ async fn collect(st: &Arc<AppState>) -> anyhow::Result<()> {
             // aruaru-search が使えるあいだは、共有キーの検索枠へは移らない(日中の世界リサーチの枠を守る)
             free_only: free,
             use_osm: false,
+            // 検索元に機械利用を疑われないよう、無料検索のときは1件ずつ間を空け、検索語も短くする
+            pace_ms: if free { CRAWL_PACE_MS } else { 0 },
+            short_queries: free,
         };
         match research::run(&st.http, &st.llm_base, &regions, opt).await {
             Ok(out) => {
