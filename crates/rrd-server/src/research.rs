@@ -1061,7 +1061,14 @@ pub async fn run(
             match job.kind {
                 Kind::Web => {
                     let body = serde_json::json!({ "source": "google", "query": job.query, "max_results": per, "gl": job.gl, "hl": job.hl, "free_only": free_only });
-                    match search_raw(http, base, body).await {
+                    let got = search_raw(http, base, body).await;
+                    if std::env::var("RRD_DEBUG_SEARCH").is_ok() {
+                        match &got {
+                            Ok(rs) => eprintln!("realdata.pro[debug]: 検索 {:?} → {} 件", job.query, rs.len()),
+                            Err(e) => eprintln!("realdata.pro[debug]: 検索 {:?} → 失敗 {e:#}", job.query),
+                        }
+                    }
+                    match got {
                         Ok(rs) => {
                             let items = rs
                                 .iter()
