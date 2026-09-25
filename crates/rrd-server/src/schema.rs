@@ -533,7 +533,7 @@ impl QueryRoot {
         })
     }
 
-    /// aruaru-db(版管理)が使えるか。
+    /// 保存と版管理(GitHub の非公開リポジトリ)が使えるか。
     async fn versioning_enabled(&self, ctx: &Context<'_>) -> bool {
         state(ctx).store.is_some()
     }
@@ -665,7 +665,7 @@ impl QueryRoot {
 
 fn need_store<'a>(ctx: &Context<'a>) -> Result<&'a crate::store::Store> {
     state(ctx).store.as_ref().ok_or_else(|| {
-        Error::new("版管理(aruaru-db)が設定されていません。環境変数 RRD_DB_DSN を設定してください")
+        Error::new("保存先(GitHub の非公開リポジトリ)が設定されていません。環境変数 RRD_ARCHIVE_REPO を設定してください")
     })
 }
 
@@ -963,7 +963,7 @@ impl MutationRoot {
         })
     }
 
-    /// データセットを aruaru-db に保存し、その時点を「版」として記録する(Git-on-SQL の commit)。
+    /// データセットを GitHub の非公開リポジトリに保存する。1回の保存が1つの「版」(コミット)になる。
     async fn save_dataset(
         &self,
         ctx: &Context<'_>,
@@ -977,17 +977,11 @@ impl MutationRoot {
         }
         let csv = with_dataset(ctx, &name, |df| Ok(rrd_core::csv::to_csv_string(df)))?;
         let now = crate::market::now_unix() as i64;
-        let e = |e: anyhow::Error| Error::new(format!("{e:#}"));
-        store.save(&name, &csv, now).await.map_err(e)?;
-        // 履歴には利用者のメモを残し、aruaru-db のコミットメッセージは固定の英数字にする
+        // GitHub の非公開リポジトリへ保存する。1回の保存が1コミット(版)で、メモは履歴に残る
         let commit_id = store
-            .commit(&format!("realdata.pro save {name}"))
+            .save_version(&name, &csv, &note, now)
             .await
-            .map_err(e)?;
-        store
-            .record_version(&commit_id, &name, &note, now)
-            .await
-            .map_err(e)?;
+            .map_err(|e| Error::new(format!("{e:#}")))?;
         Ok(DatasetVersion {
             commit_id,
             note,
@@ -995,7 +989,7 @@ impl MutationRoot {
         })
     }
 
-    /// 過去の版のデータセットを into として読み込み直す(AS OF COMMIT で分析を再現)。
+    /// 過去の版のデータセットを into として読み込み直す(コミットを指定して分析を再現)。
     async fn restore_dataset(
         &self,
         ctx: &Context<'_>,
@@ -1132,6 +1126,8 @@ impl MutationRoot {
                 include_youtube: input.include_youtube,
                 languages: input.languages,
                 analyze: true,
+                free_only: false,
+                use_osm: true,
             },
         )
         .await
@@ -1278,7 +1274,7 @@ impl MutationRoot {
     }
 
     /// データセットを削除する。存在していれば true。
-    /// aruaru-db に保存済みなら、保存分も削除する(再起動で復活しないように)。過去の版は残る。
+    /// 保存済みなら、保存分も削除する(再起動で復活しないように)。過去の版は履歴に残る。
     async fn drop_dataset(&self, ctx: &Context<'_>, name: String) -> Result<bool> {
         let existed = state(ctx)
             .datasets

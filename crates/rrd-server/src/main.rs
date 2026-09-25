@@ -10,10 +10,11 @@
 //! 環境変数:
 //! - `RRD_BIND`      待受アドレス(既定 127.0.0.1:4701)
 //! - `RRD_MAX_BODY`  リクエストボディ上限バイト数(既定 32MiB)
-//! - `RRD_DB_DSN`  aruaru-db の接続文字列(設定すると保存・版管理が使える。パスワードは表示しない)
+//! - `RRD_ARCHIVE_REPO`  保存先の GitHub 非公開リポジトリ(設定すると保存・版管理が使える。認証は git の設定に任せる)
 //! - `RRD_DATA_DIR`  収集結果の保存先(既定 data)
 //! - `RRD_ARUARU_LLM_URL`  aruaru-llm の URL(既定 http://127.0.0.1:4600、検索取り込みと AI 説明に使う)
 
+mod archive;
 mod crawl;
 mod deposits;
 mod explain;
@@ -105,38 +106,12 @@ async fn main() -> std::io::Result<()> {
             .unwrap_or_else(|_| "data".into())
             .into(),
     );
-    // aruaru-db(版管理)。接続できなくてもサーバーは起動し、版管理だけ使えない状態にする。
-    if let Ok(dsn) = std::env::var("RRD_DB_DSN") {
-        match store::Store::connect(&dsn).await {
-            Ok(s) => {
-                match s.load_all().await {
-                    Ok(saved) => {
-                        let mut map = state
-                            .datasets
-                            .write()
-                            .expect("起動直後のためロックは競合しない");
-                        for (name, csv) in saved {
-                            match rrd_core::csv::read_csv_str(&csv) {
-                                Ok(df) => {
-                                    map.insert(name, df);
-                                }
-                                Err(e) => {
-                                    eprintln!("realdata.pro: 保存済みの {name} を読めません: {e}")
-                                }
-                            }
-                        }
-                        println!(
-                            "realdata.pro: aruaru-db から {} 件のデータセットを読み込みました",
-                            map.len()
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("realdata.pro: 保存済みデータセットの読み込みに失敗: {e:#}")
-                    }
-                }
-                state.store = Some(s);
-            }
-            Err(e) => eprintln!("realdata.pro: 版管理は無効です({e:#})"),
+    // 保存先: GitHub の非公開リポジトリ(VPS の DB・ディスクには保存しない)。
+    // 接続できなくてもサーバーは起動し、保存・版管理だけ使えない状態にする。
+    if let Some(repo) = archive::repo_from_env() {
+        match store::Store::connect(&repo).await {
+            Ok(s) => state.store = Some(s),
+            Err(e) => eprintln!("realdata.pro: 保存先(GitHub)を使えません({e:#})"),
         }
     }
     let state = Arc::new(state);
@@ -144,6 +119,7 @@ async fn main() -> std::io::Result<()> {
     tokio::spawn(schedule(state.clone()));
     tokio::spawn(tuning::ensure_profile(state.clone(), false));
     tokio::spawn(load_regions(state.clone()));
+    tokio::spawn(load_saved(state.clone()));
     crawl::load_latest(&state);
     let schema = build_schema(state);
 
@@ -186,6 +162,32 @@ async fn schedule(state: Arc<AppState>) {
         if hour >= 7 && crawl::is_due(&state) {
             tokio::spawn(crawl::run_daily(state.clone()));
         }
+        // 保存できずに手元に残った収集結果を GitHub へ送り直す(毎日1回)
+        if hour >= 7 && crawl::archive_due(&state) {
+            tokio::spawn(crawl::archive_old(state.clone()));
+        }
+    }
+}
+
+/// 保存先(GitHub)から、新しいデータセットを読み込む。取得に時間がかかるので、裏で行う。
+async fn load_saved(state: Arc<AppState>) {
+    let Some(store) = &state.store else { return };
+    match store.load_recent(60, 7).await {
+        Ok(saved) => {
+            let n = saved.len();
+            if let Ok(mut map) = state.datasets.write() {
+                for (name, csv) in saved {
+                    match rrd_core::csv::read_csv_str(&csv) {
+                        Ok(df) => {
+                            map.entry(name).or_insert(df);
+                        }
+                        Err(e) => eprintln!("realdata.pro: 保存済みの {name} を読めません: {e}"),
+                    }
+                }
+            }
+            println!("realdata.pro: GitHub の保存先から {n} 件のデータセットを読み込みました");
+        }
+        Err(e) => eprintln!("realdata.pro: 保存済みデータセットの読み込みに失敗: {e:#}"),
     }
 }
 

@@ -69,6 +69,31 @@ pub const COUNTRIES: &[(&str, &str, &str, &str, &str)] = &[
 pub const MAX_PLACES: usize = 6;
 /// 1回のリサーチで行う Web 検索の上限(場所 × 検索言語 × (テーマ + 知りたい情報))。検索 API の無料枠を守るため。
 const MAX_SEARCHES: usize = 30;
+/// 1日に行える検索の合計(毎朝の自動収集も、日中の世界リサーチも合わせて)。保存先の GitHub の容量に収めるため。
+/// 見積り: 1検索≒3件≒2.4KB(圧縮後≒0.7KB)。3,000件/日 で 1年≒0.8GB(GitHub の推奨は1リポジトリ1GB未満)
+pub const MAX_SEARCHES_PER_DAY: u64 = 3_000;
+
+/// (日本時間の通算日, その日に使った検索の数)
+static DAILY_SEARCHES: std::sync::Mutex<(u64, u64)> = std::sync::Mutex::new((0, 0));
+
+/// 検索を `n` 回ぶん使う。1日の上限を超えるなら、何も使わずにエラーを返す。
+fn take_daily_searches(n: u64) -> Result<()> {
+    let day = (crate::market::now_unix() + 9 * 3600) / 86_400;
+    let mut g = DAILY_SEARCHES
+        .lock()
+        .map_err(|_| anyhow!("内部状態にアクセスできません"))?;
+    if g.0 != day {
+        *g = (day, 0);
+    }
+    if g.1 + n > MAX_SEARCHES_PER_DAY {
+        bail!(
+            "本日の検索の上限({MAX_SEARCHES_PER_DAY}件)に達しました(使用済み {}件、今回 {n}件)。日本時間の翌日に再開します",
+            g.1
+        );
+    }
+    g.1 += n;
+    Ok(())
+}
 /// 現地語に加えて追加できる検索言語の数。
 const MAX_EXTRA_LANGS: usize = 3;
 const MAX_PER_COUNTRY: u8 = 10;
@@ -93,6 +118,10 @@ pub struct Options {
     pub languages: Vec<String>,
     /// false なら集めるだけ(AI の分析・翻訳をしない。毎朝の自動収集用)
     pub analyze: bool,
+    /// true なら無料の自前メタ検索(aruaru-search)だけを使い、共有キーの検索枠へは移らない(毎朝の自動収集用)
+    pub free_only: bool,
+    /// 公開の地図データ(OpenStreetMap)も引くか(大量の自動収集では引かない)
+    pub use_osm: bool,
 }
 
 /// 収集した1件。
@@ -874,6 +903,7 @@ pub async fn run(
         );
     }
 
+    take_daily_searches(planned as u64)?;
     // 2. テーマと知りたい情報の翻訳(現地語ごと)。日本語・英語の知りたい情報は固定の検索語を使う。
     // GitHub / YouTube は英語で検索するため、英語は常に含める
     let mut need: Vec<&str> = targets
@@ -970,7 +1000,7 @@ pub async fn run(
         }
         // 地図データ(OpenStreetMap): 検索の無料枠を使わず、施設の名前・住所・公式サイトを直接取る
         for tp in &topics {
-            if crate::osm::filters(tp.id).is_some() {
+            if opt.use_osm && crate::osm::filters(tp.id).is_some() {
                 jobs.push(Job {
                     target: ti,
                     topic: Some(tp),
@@ -1015,13 +1045,14 @@ pub async fn run(
         .collect();
 
     // 4. 収集(最大6件を同時に。結果は元の順に並べ直す)
+    let free_only = opt.free_only;
     let targets_ref = &targets;
     let mut results: Vec<(usize, Vec<Item>, Option<String>)> = futures::stream::iter(jobs.into_iter().enumerate())
         .map(|(idx, job)| async move {
             let t = &targets_ref[job.target];
             match job.kind {
                 Kind::Web => {
-                    let body = serde_json::json!({ "source": "google", "query": job.query, "max_results": per, "gl": job.gl, "hl": job.hl });
+                    let body = serde_json::json!({ "source": "google", "query": job.query, "max_results": per, "gl": job.gl, "hl": job.hl, "free_only": free_only });
                     match search_raw(http, base, body).await {
                         Ok(rs) => {
                             let items = rs
