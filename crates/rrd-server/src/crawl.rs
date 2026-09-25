@@ -209,7 +209,19 @@ async fn collect(st: &Arc<AppState>) -> anyhow::Result<()> {
     }
     let mut merged: Option<String> = None;
     let (mut ok, mut failed) = (0usize, 0usize);
+    eprintln!(
+        "realdata.pro: 毎朝の自動収集を開始します(場所 {} か所、検索の組 {} 件、無料検索 {})",
+        places.len(),
+        places.iter().map(|(_, t)| t.len()).sum::<usize>(),
+        if free { "使える" } else { "使えない" }
+    );
     for (place, topics) in places {
+        let n_topics = topics.len();
+        let label = format!(
+            "{}/{}",
+            place.country,
+            place.region.clone().unwrap_or_else(|| "全国".into())
+        );
         let opt = research::Options {
             theme: String::new(),
             places: vec![place],
@@ -229,6 +241,10 @@ async fn collect(st: &Arc<AppState>) -> anyhow::Result<()> {
         match research::run(&st.http, &st.llm_base, &regions, opt).await {
             Ok(out) => {
                 ok += 1;
+                eprintln!(
+                    "realdata.pro: 自動収集 {label}: {n_topics}件の検索で {} 件を収集",
+                    out.items.len()
+                );
                 let csv = rrd_core::csv::to_csv_string(&out.df);
                 match &mut merged {
                     None => merged = Some(csv),
@@ -245,8 +261,8 @@ async fn collect(st: &Arc<AppState>) -> anyhow::Result<()> {
                 failed += 1;
                 let msg = format!("{e:#}");
                 eprintln!(
-                    "realdata.pro: 毎朝の自動収集(1か所)に失敗: {}",
-                    msg.chars().take(200).collect::<String>()
+                    "realdata.pro: 毎朝の自動収集(1か所)に失敗 {label}({n_topics}件の検索): {}",
+                    msg.chars().take(600).collect::<String>()
                 );
                 if msg.contains("quota") || msg.contains("free search") {
                     break; // 検索が使えない(枠切れ・検索元に拒否)。残りの場所は明日にする
