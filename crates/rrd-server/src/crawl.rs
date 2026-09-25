@@ -113,7 +113,11 @@ pub fn is_due(st: &AppState) -> bool {
         return false;
     }
     let name = today(now);
-    !dir(st).join(format!("{name}.csv")).exists()
+    // 今日のぶんが、手元(保存に失敗して残っているもの)にも、読み込み済みのデータにも無ければ実行する。
+    // `RRD_CRAWL_FORCE=1` なら、今日のぶんがあっても、起動後に1回だけ実行する(動作確認・やり直し用)。
+    let done = dir(st).join(format!("{name}.csv")).exists()
+        || st.datasets.read().is_ok_and(|m| m.contains_key(&name));
+    !done || std::env::var("RRD_CRAWL_FORCE").is_ok_and(|v| v == "1")
 }
 
 /// 保存済みの最新の収集結果を、起動時に読み込む(再起動しても分析に使えるようにする)。
