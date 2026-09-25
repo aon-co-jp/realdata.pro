@@ -26,6 +26,8 @@ pub struct Target {
     /// 表示用(例: "日本 › 東京都 › 渋谷区")
     pub label: String,
     pub country_en: String,
+    /// 国コード(ISO 3166、例: JP)
+    pub iso: String,
     pub country_ja: String,
     pub gl: String,
     pub hl: String,
@@ -34,6 +36,10 @@ pub struct Target {
     /// 検索語に付ける場所の言葉(国全体なら国名)
     pub place_text: String,
     pub whole_country: bool,
+    /// 都道府県・州の名前(地図データの検索用)
+    pub region: Option<String>,
+    /// 市区町村・都市の名前
+    pub city: Option<String>,
 }
 
 /// 「知りたい情報」。`ja` と `en` は固定の検索語、それ以外の言語は AI に翻訳させる(`ai_phrase` が元)。
@@ -587,12 +593,15 @@ pub fn resolve(p: &Place, regions: &RegionData) -> Result<Target> {
     Ok(Target {
         label,
         country_en: country.name.clone(),
+        iso: country.code.clone(),
         country_ja,
         gl,
         hl,
         lang,
         place_text,
         whole_country,
+        region: region_name.clone(),
+        city: city_name.clone(),
     })
 }
 

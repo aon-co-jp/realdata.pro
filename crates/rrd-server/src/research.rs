@@ -431,6 +431,8 @@ fn hl_for(code: &str) -> String {
 enum Kind {
     Web,
     News,
+    /// 公開の地図データ(検索の無料枠を使わない)
+    Osm,
 }
 
 /// 1回の検索。
@@ -966,6 +968,22 @@ pub async fn run(
                 });
             }
         }
+        // 地図データ(OpenStreetMap): 検索の無料枠を使わず、施設の名前・住所・公式サイトを直接取る
+        for tp in &topics {
+            if crate::osm::filters(tp.id).is_some() {
+                jobs.push(Job {
+                    target: ti,
+                    topic: Some(tp),
+                    lang_ja: "",
+                    gl: String::new(),
+                    hl: String::new(),
+                    query: String::new(),
+                    key: String::new(),
+                    is_own: true,
+                    kind: Kind::Osm,
+                });
+            }
+        }
         if opt.include_news && t.whole_country {
             jobs.push(Job {
                 target: ti,
@@ -1024,6 +1042,39 @@ pub async fn run(
                             (idx, items, None)
                         }
                         Err(e) => (idx, vec![], Some(format!("{} の Web 検索に失敗: {e:#}", t.label))),
+                    }
+                }
+                Kind::Osm => {
+                    let tp = job.topic.expect("地図データの検索には知りたい情報がある");
+                    let limit = (per as usize * 2).clamp(6, 20) as u8;
+                    let got = match crate::osm::build_query(t, &t.iso, tp.id, limit) {
+                        Ok(q) => crate::osm::fetch(http, &q).await,
+                        Err(e) => Err(e),
+                    };
+                    match got {
+                        Ok(ps) => {
+                            let items = ps
+                                .into_iter()
+                                .map(|p| Item {
+                                    country: t.label.clone(),
+                                    topic: tp.label.to_string(),
+                                    source: "osm",
+                                    query: format!("OpenStreetMap: {}", tp.label),
+                                    key: String::new(),
+                                    title_tr: None,
+                                    snippet_tr: None,
+                                    title: p.name,
+                                    snippet: [p.kind, p.address]
+                                        .into_iter()
+                                        .filter(|s| !s.is_empty())
+                                        .collect::<Vec<_>>()
+                                        .join(" / "),
+                                    url: p.url,
+                                })
+                                .collect();
+                            (idx, items, None)
+                        }
+                        Err(e) => (idx, vec![], Some(format!("{} の地図データ({})を取得できませんでした: {e:#}", t.label, tp.label))),
                     }
                 }
                 Kind::News => match country_news(http, base, &t.country_en).await {

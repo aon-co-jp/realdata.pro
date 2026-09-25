@@ -20,6 +20,7 @@ mod explain;
 mod ingest;
 mod languages;
 mod market;
+mod osm;
 mod places;
 mod regions;
 mod research;

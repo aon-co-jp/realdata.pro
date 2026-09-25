@@ -178,6 +178,7 @@ button:disabled{opacity:.5;cursor:progress}
     </div>
     <label><input type="checkbox" id="rConsent"> テーマと集めた公開情報を AI(aruaru-llm 経由で外部の AI 事業者を含む)へ送ることに同意します</label>
     <button id="doResearch">リサーチを開始</button>
+    <p class="meta">出典: 施設の情報は地図データ © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>(ODbL)、国・州・都市の名前は <a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer">GeoNames</a>(CC BY 4.0)、日本の市区町村は <a href="https://github.com/geolonia/japanese-addresses" target="_blank" rel="noopener noreferrer">geolonia 住所データ</a>(CC BY 4.0)。検索の無料枠を使わずに取得します。</p>
     <div id="rout"></div>
   </section>
 
@@ -596,7 +597,7 @@ updatePlaceCount();
 
 // ───── 世界リサーチ ─────
 const countryJa = new Map([['Global', '世界全体']]);
-const sourceJa = { web: 'Web 検索', news: '国別の主要ニュース', github: 'GitHub', youtube: 'YouTube' };
+const sourceJa = { web: 'Web 検索', news: '国別の主要ニュース', github: 'GitHub', youtube: 'YouTube', osm: '公開の地図データ(OpenStreetMap)' };
 // 外部由来の URL は http / https のときだけリンクにする(javascript: 等を防ぐ)
 function safeLink(url, text) {
   try { const u = new URL(url); if (u.protocol === 'http:' || u.protocol === 'https:') { const a = el('a', { href: u.href, target: '_blank', rel: 'noopener noreferrer' }, text); return a; } } catch (_) {}
