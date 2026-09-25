@@ -118,6 +118,7 @@ async fn main() -> std::io::Result<()> {
     println!("realdata.pro: 計算デバイス = {}", state.device.info().name);
     tokio::spawn(schedule(state.clone()));
     tokio::spawn(tuning::ensure_profile(state.clone(), false));
+    osm::init(archive::repo_from_env());
     tokio::spawn(load_regions(state.clone()));
     tokio::spawn(load_saved(state.clone()));
     crawl::load_latest(&state);
@@ -161,6 +162,26 @@ async fn schedule(state: Arc<AppState>) {
         }
         if hour >= 7 && crawl::is_due(&state) {
             tokio::spawn(crawl::run_daily(state.clone()));
+        }
+        // 夜(日本時間の1〜6時)に、地図データの先取得(都道府県×分類、1日に決まった数だけ)
+        if osm::refresh_due(u64::from(hour)) {
+            let st = state.clone();
+            tokio::spawn(async move {
+                let regions = st.regions.read().ok().and_then(|g| g.clone());
+                let n = std::env::var("RRD_OSM_PAIRS_PER_DAY")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(30)
+                    .clamp(1, 200);
+                if let Some(r) = regions {
+                    match osm::refresh(&st.http, &r, n).await {
+                        Ok(done) => eprintln!(
+                            "realdata.pro: 地図データを {done} 件、先に取得して保存しました"
+                        ),
+                        Err(e) => eprintln!("realdata.pro: 地図データの先取得に失敗: {e:#}"),
+                    }
+                }
+            });
         }
         // 保存できずに手元に残った収集結果を GitHub へ送り直す(毎日1回)
         if hour >= 7 && crawl::archive_due(&state) {

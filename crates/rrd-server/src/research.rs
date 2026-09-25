@@ -1044,6 +1044,14 @@ pub async fn run(
         })
         .collect();
 
+    // 地図データは、夜のうちに先に取得して保存したものを使う(数の多い分類は、その場では時間切れになるため)。
+    // 必要な保存済みデータを、まとめて1回で読み込む。
+    let osm_needs: Vec<(&Target, &str)> = jobs
+        .iter()
+        .filter(|j| matches!(j.kind, Kind::Osm))
+        .filter_map(|j| j.topic.map(|tp| (&targets[j.target], tp.id)))
+        .collect();
+    crate::osm::preload(&osm_needs).await;
     // 4. 収集(最大6件を同時に。結果は元の順に並べ直す)
     let free_only = opt.free_only;
     let targets_ref = &targets;
@@ -1078,10 +1086,9 @@ pub async fn run(
                 Kind::Osm => {
                     let tp = job.topic.expect("地図データの検索には知りたい情報がある");
                     let limit = (per as usize * 2).clamp(6, 20) as u8;
-                    let got = match crate::osm::build_query(t, &t.iso, tp.id, limit) {
-                        Ok(q) => crate::osm::fetch(http, &q).await,
-                        Err(e) => Err(e),
-                    };
+                    let got = crate::osm::get(http, t, tp.id, limit as usize)
+                        .await
+                        .map(|(places, _saved)| places);
                     match got {
                         Ok(ps) => {
                             let items = ps
