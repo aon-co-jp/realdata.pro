@@ -161,6 +161,34 @@ YouTube は VPS にキーが無いため、警告を出したうえで処理を�
 - 2026-09-24 時点のローカル検証: 開発機のキー(`F:\API.txt`)では、Google Custom Search JSON API が
   「このプロジェクトは API へのアクセス権がない」(HTTP 403)を返した。VPS の設定での動作確認は、デプロイ後に行う。
 
+## 毎朝の自動収集(aruaru-search)の試験結果(2026-09-26)
+
+- 試験収集の1か所目(岩手県)は、27件の検索で70件を収集できた(以前は同じ場所が0件で失敗していた)。
+- 拒否・検索語の一部しか反映されない Bing・Brave は1時間休止し、Yahoo! JAPAN・Daum・Baidu・Naver で収集できている。
+  自動収集は共有検索の枠(1日100回)を使わなくなった。
+- 3か所の試験収集のうち残り2か所は実行中。1か所約20分かかるため、日本全国48か所の既定は1日600件(約22か所)、
+  全国一巡に約2日の見込み。全体の成功率は未計測。
+- 試験用設定(強制実行・件数81・デバッグログ)は設定ファイルから除去済み。現在実行中の試験はそのまま完了させ、
+  次のVPS再起動では強制実行しない。
+- 課題: 日本語検索元が Bing・Brave・Yahoo! JAPAN の3つのみで、休止が重なると手薄になる。他の検索元は拒否か
+  結果形式が使えず、検索元を増やす取り組みが引き続き必要。翌朝、1日600件設定での自動収集成功を確認し報告する。
+
+### Daily automatic collection (aruaru-search) test results (2026-09-26, English)
+
+- The first test location (Iwate) collected 70 records from 27 searches (previously 0 records at the same
+  location).
+- Bing and Brave (rejected or only partially honoring the query) are suspended for 1 hour; Yahoo! JAPAN,
+  Daum, Baidu, and Naver are collecting successfully. Automatic collection no longer consumes the shared
+  search quota (100/day).
+- Of 3 test locations, 2 remain in progress. Each location takes ~20 minutes, so the daily default across
+  Japan's 48 locations is 600 searches (~22 locations/day), estimated at ~2 days for a full national pass.
+  Overall success rate not yet measured.
+- Test-only settings (forced run, count 81, debug logging) have been removed from the config; the
+  currently running test will finish as-is, and the next VPS restart will not force a run.
+- Remaining issue: only 3 Japanese-language sources (Bing, Brave, Yahoo! JAPAN) exist, so overlapping
+  suspensions thin coverage; other sources tried are either rejected or return unusable formats — adding
+  more sources remains necessary. Tomorrow morning we will confirm success under the 600/day setting.
+
 ## 実装メモ
 
 - `Column` は型ごとの `Vec<Option<T>>`(int/float/bool/str)。`None` が欠損。

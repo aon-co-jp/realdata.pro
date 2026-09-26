@@ -19,6 +19,15 @@
 根拠はすべて、実際に集めた記事へのリンクで示します。レポートは日本語・英語と約130言語から選べます。
 集めた記事はデータセットになり、集計やグラフにもそのまま使えます。
 
+> **毎朝の自動収集の試験(2026-09-26)**: 日本全国48か所を対象に試験中。1か所目(岩手県)は27件の検索で
+> 70件を収集(以前は0件で失敗)。既定は1日600件(約22か所/日)で、全国一巡に約2日の見込み。詳細は
+> [PORTING.md](PORTING.md)・[CLAUDE.md](CLAUDE.md)を参照。
+>
+> *Automatic daily collection test (2026-09-26, English): testing across 48 locations in Japan. The first
+> location (Iwate) collected 70 records from 27 searches (previously failed with 0). Default is 600
+> searches/day (~22 locations/day), an estimated ~2 days for a full national pass. See
+> [PORTING.md](PORTING.md) / [CLAUDE.md](CLAUDE.md) for details.*
+
 ## aon-co-jp エコシステムで構成
 
 | 役割 | 使うもの | 状態 |

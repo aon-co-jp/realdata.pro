@@ -73,3 +73,36 @@ cargo run -p rrd-server        # http://127.0.0.1:4701/
 - **毎朝の自動収集は無料の自前メタ検索(aruaru-search)だけを使う**(`free_only`)。共有キーの検索(1日100回)へは移らない。使えないときは1日20件。
 - **地図データ(OpenStreetMap)は夜(日本時間1〜6時)に先取得**して `osm/` に保存し(`osm::refresh`、1日30件、90日で一巡)、世界リサーチでは保存済みを使う。数の多い分類をその場で問い合わせると時間切れになるため。
 - `RRD_CRAWL_FORCE=1` を付けて起動すると、今日のぶんがあっても、起動後に1回だけ毎朝の自動収集を実行する(動作確認用)。動作確認のあとは外すこと。
+
+## 試験収集の結果(2026-09-26)
+
+- **確認できたこと**: 試験収集の1か所目(岩手県)は、27件の検索で70件を収集できた(以前は同じ場所が「1件も集められない」で失敗していた)。
+  修正版では、拒否されたり検索語の一部しか反映されなかったりする Bing と Brave は1時間休止し、
+  Yahoo! JAPAN・Daum・Baidu・Naver は使えている。自動収集は共有検索の枠を使わなくなった。
+- **まだ確認できていないこと**: 3か所の試験収集は、残り2か所が実行中。1か所に約20分かかり、
+  日本全国48か所を回るには時間がかかるため既定を1日600件(約22か所)にしている。全国を一巡するには約2日かかる計算。
+  全体の成功率はまだ見ていない。
+- **設定の後始末**: 試験用の設定(強制実行・件数81・デバッグログ)は設定ファイルから外した。
+  現在動いている試験収集はそのまま完了させる。次にVPSを再起動しても、強制実行は行われない。
+- **今後の課題**: 日本語の検索元が Bing・Brave・Yahoo! JAPAN の3つしかなく、休止が重なると細くなる。
+  他の検索元も試したが、いずれも拒否されるか結果の形が使えなかった。対象の検索元を増やす取り組みは引き続き必要。
+  翌朝、自動収集が1日600件の設定で成功するかを確認し、結果を報告する。
+
+### Test collection results (2026-09-26, English)
+
+- **Confirmed**: The first test-collection location (Iwate) gathered 70 records from 27 searches
+  (previously this same location failed with "0 records collected"). In the fixed version, Bing and Brave
+  — which were either rejected or only honored part of the query — are suspended for 1 hour, while
+  Yahoo! JAPAN, Daum, Baidu, and Naver are working. Automatic collection no longer consumes the shared
+  search quota.
+- **Not yet confirmed**: Of the 3 test locations, 2 are still running. One location took about 20 minutes;
+  covering all 48 locations in Japan takes a long time, so the daily default is set to 600 searches
+  (~22 locations). A full pass over the whole country is estimated at ~2 days. Overall success rate has
+  not yet been measured.
+- **Cleanup**: Test-only settings (forced run, count 81, debug logging) have been removed from the config
+  file. The test collection currently running will be allowed to finish as-is; the next VPS restart will
+  not trigger a forced run.
+- **Remaining work**: Only 3 Japanese-language search sources (Bing, Brave, Yahoo! JAPAN) exist, so
+  overlapping suspensions thin out coverage. Other sources tried were either rejected or returned unusable
+  result formats. Adding more search sources remains necessary. Tomorrow morning, we will confirm whether
+  automatic collection succeeds under the 600/day setting and report the outcome.
