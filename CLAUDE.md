@@ -81,7 +81,15 @@ GitHubの1リポジトリ10GB上限に備え、`RRD_CATALOG_REPO`(索引リポ�
 (`RRD_GITHUB_TOKEN`または`GITHUB_TOKEN`)で新しい非公開リポジトリを自動作成し、書き込み先を自動的に
 切り替える(`vault.rs`)。未設定なら、これまでどおり単一リポジトリのみで動く。詳細は
 [PORTING.md](PORTING.md)「保管庫の複数リポジトリ自動引っ越し」を参照。開発機でのビルド・lint・
-テスト(45件)はすべて通過済み。VPSへのデプロイ・実運用での引っ越し検証はこれから。
+テスト(45件)はすべて通過済み。
+
+**本番で有効化済み(2026-09-28)**: 索引リポジトリ `aon-co-jp/realdata-catalog`(非公開)を新規作成し、
+VPS の `realdata-pro.service` に `RRD_CATALOG_REPO` を設定・`RRD_GITHUB_TOKEN`(既存の gh CLI トークン、
+`repo` scope)を `.env.realdata` に追加して再起動、有効化を確認した(起動ログに「保管庫の自動引っ越しが
+有効です」)。GraphQL 経由で実際に保存(`saveDataset`)→ `catalog.json` にシャードとパスの索引が記録
+されたこと、削除(`dropDataset`)→ 索引が消えたことを実機で確認済み(テスト用データセットは削除済み)。
+現在のシャードは `realdata-archive` 1つのみ(容量はしきい値8GBに遠く及ばず、まだ引っ越しは起きていない。
+実際に容量が近づいての自動作成・引っ越し自体は今後の運用の中で確認する)。
 
 ## 試験収集の結果(2026-09-26)
 
