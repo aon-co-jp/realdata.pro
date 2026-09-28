@@ -88,6 +88,46 @@ cargo run -p rrd-server        # http://127.0.0.1:4701/
   他の検索元も試したが、いずれも拒否されるか結果の形が使えなかった。対象の検索元を増やす取り組みは引き続き必要。
   翌朝、自動収集が1日600件の設定で成功するかを確認し、結果を報告する。
 
+## バグ調査: 「27件の検索で70件収集」は正常、ただし別の実バグを発見(2026-09-28)
+
+- ユーザーからの指摘: 「1日600件中、70件しか集められなかったのか」。確認の結果、**表現の誤解であり、
+  この件自体はバグではない**。600件は「1日に使う検索の組の数」(27種類の知りたい情報 × 場所)の上限で、
+  「70件」は**そのうち1か所ぶん(27件の検索)から集められた記事数**(理論上の最大 27×3=81件に対して86%)。
+  600件全体に対する到達率ではない。ドキュメントの書き方が紛らわしかったため、上の節に注記を追加した。
+- **ただし、調査の過程で別の実バグを発見した**: VPS の `realdata-pro.service` が、2026-09-25 16:15 JST の
+  起動時点の環境変数(試験用の `RRD_CRAWL_FORCE=1` / `RRD_CRAWL_SEARCHES_PER_DAY=81`)を**プロセスに
+  保持したまま**、3日間(9/26・9/27・9/28)ずっと動き続けていた。設定ファイル(`.env.realdata`・
+  systemd drop-in)からは試験用の値を外していたが、**サービスを再起動していなかった**ため、
+  「今動いているプロセス」には反映されず、毎朝の自動収集が既定の600件(約22か所)ではなく、
+  試験用の81件(3か所のみ)で動き続けていた。
+  - `/proc/<pid>/environ` で確認し、`systemctl restart realdata-pro.service` で解消(2026-09-28)。
+    再起動後の環境変数には `RRD_CRAWL_FORCE` / `RRD_CRAWL_SEARCHES_PER_DAY` が無いことを確認済み。
+  - 翌日(2026-09-29)7:00 JST の自動収集から、正しい既定(600件・約22か所)で動くはず。結果は要確認。
+  - 教訓: 設定ファイルを直しただけでは、動いているプロセスの環境変数は変わらない。**環境変数がらみの
+    設定変更は、必ずサービスを再起動するところまで確認する**(または起動時に読み込む値をログに出力し、
+    起動後に照合する)。
+
+### Bug investigation: "70 of 27 searches" is normal, but a real bug was found elsewhere (2026-09-28, English)
+
+- User question: "did you only manage to collect 70 out of a 600/day target?" On investigation, **this
+  specific point was a misunderstanding of the wording, not a bug**: 600 is the daily budget of *search
+  units* (27 topics × location), and "70" was the number of articles gathered from *one* location's 27
+  searches (86% of the theoretical max of 27×3=81) — not a 70/600 shortfall. The docs wording was clarified
+  above.
+- **However, the investigation surfaced an actual bug**: the VPS's `realdata-pro.service` had been running
+  continuously since 2026-09-25 16:15 JST with the test-only environment variables it was started with
+  (`RRD_CRAWL_FORCE=1`, `RRD_CRAWL_SEARCHES_PER_DAY=81`) still held in the live process, even though those
+  values had been removed from the config files (`.env.realdata`, the systemd drop-in) — **the service was
+  never restarted**, so for 3 days (9/26, 9/27, 9/28) daily automatic collection kept running at the
+  test setting of 81 searches (3 locations) instead of the intended default of 600 (~22 locations).
+  - Confirmed via `/proc/<pid>/environ`; resolved with `systemctl restart realdata-pro.service`
+    (2026-09-28). Verified the restarted process's environment no longer has those variables.
+  - Tomorrow's (2026-09-29) 7:00 JST run should be the first to use the correct default (600 searches,
+    ~22 locations). Outcome to be confirmed.
+  - Lesson: editing config files alone does not change a running process's environment. **Any
+    environment-variable config change must be followed through to a service restart** (or the startup
+    values should be logged and cross-checked after the fact).
+
 ### Test collection results (2026-09-26, English)
 
 - **Confirmed**: The first test-collection location (Iwate) gathered 70 records from 27 searches
