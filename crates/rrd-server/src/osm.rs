@@ -348,11 +348,22 @@ pub async fn preload(needs: &[(&Target, &str)]) {
     if paths.is_empty() {
         return;
     }
-    if let Ok(got) = crate::archive::read_many(repo, "HEAD", &paths).await {
-        if let Ok(mut m) = mem().write() {
-            for (p, bytes) in got {
-                if let Some(s) = bytes.and_then(|b| serde_json::from_slice::<Stored>(&b).ok()) {
-                    m.insert(p, (s.fetched_unix, s.places));
+    // パスをシャードごとにまとめてから読む(索引に無いものは、最初のシャードにあるものとして扱う。
+    // 複数シャードにまたがる場合だけ、経路ごとの検索でも足りなければ読めない=次のその場問い合わせに回る)。
+    let mut by_repo: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for p in paths {
+        let r = crate::vault::repo_for(&p)
+            .await
+            .unwrap_or_else(|| repo.to_string());
+        by_repo.entry(r).or_default().push(p);
+    }
+    for (r, ps) in by_repo {
+        if let Ok(got) = crate::archive::read_many(&r, "HEAD", &ps).await {
+            if let Ok(mut m) = mem().write() {
+                for (p, bytes) in got {
+                    if let Some(s) = bytes.and_then(|b| serde_json::from_slice::<Stored>(&b).ok()) {
+                        m.insert(p, (s.fetched_unix, s.places));
+                    }
                 }
             }
         }
@@ -420,23 +431,27 @@ pub fn refresh_due(hour_jst: u64) -> bool {
 
 /// 都道府県 × グループの地図データを、`budget` 件だけ先に取得して GitHub に保存する。
 /// 取得できた件数を返す。1件ずつ間を空け(相手に負担をかけない)、10件ごとにまとめて保存する。
+///
+/// 保存先は [`crate::vault`] が決める(複数シャードの索引が設定されていれば、容量に応じて自動で
+/// 引っ越し先を使う)。読み込み(`preload`)は起動時に固定した `REPO`(最初のシャード)を使うが、
+/// 索引が設定されていればそちらも [`crate::vault::repo_for`] を優先する。
 pub async fn refresh(
     http: &reqwest::Client,
     regions: &crate::regions::RegionData,
     budget: usize,
 ) -> Result<usize> {
-    let Some(repo) = REPO.get() else { return Ok(0) };
+    let Some(fallback) = REPO.get() else {
+        return Ok(0);
+    };
+    let repo = crate::vault::write_repo(fallback).await;
+    let repo = &repo;
     let now = crate::market::now_unix();
     LAST_REFRESH_DAY.store(day_index(now), std::sync::atomic::Ordering::SeqCst);
     let prefs = regions.top_level("JP").items;
-    let manifest: HashMap<String, u64> =
-        crate::archive::read_many(repo, "HEAD", &[MANIFEST.to_string()])
-            .await
-            .ok()
-            .and_then(|v| v.into_iter().next())
-            .and_then(|(_, b)| b)
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+    let manifest: HashMap<String, u64> = crate::vault::read_first(repo, MANIFEST)
+        .await
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
     let mut manifest = manifest;
     // 場所の表示名(`places::resolve` の label)で数える
     let mut targets: Vec<(String, Target)> = Vec::new();
@@ -498,7 +513,12 @@ async fn flush(repo: &str, pending: &mut Vec<(String, Vec<u8>)>, manifest: &Hash
         pending.push((MANIFEST.to_string(), m));
     }
     match crate::archive::push(repo, pending, "osm cache").await {
-        Ok(_) => pending.clear(),
+        Ok(_) => {
+            for (p, _) in pending.iter() {
+                crate::vault::record(p, repo).await;
+            }
+            pending.clear();
+        }
         Err(e) => {
             eprintln!("realdata.pro: 地図データの保存に失敗(次回やり直します): {e:#}");
             pending.retain(|(p, _)| p != MANIFEST);

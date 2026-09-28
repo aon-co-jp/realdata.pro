@@ -161,6 +161,67 @@ YouTube は VPS にキーが無いため、警告を出したうえで処理を�
 - 2026-09-24 時点のローカル検証: 開発機のキー(`F:\API.txt`)では、Google Custom Search JSON API が
   「このプロジェクトは API へのアクセス権がない」(HTTP 403)を返した。VPS の設定での動作確認は、デプロイ後に行う。
 
+## 保管庫の複数リポジトリ自動引っ越し(2026-09-28)
+
+GitHub は1リポジトリあたり10GBを推奨上限としている。`RRD_ARCHIVE_REPO` の1つのリポジトリに保存し
+続けるといずれ近づくため、あらかじめ余裕を持って次のリポジトリを用意しておき、現在のシャードが
+上限に近づいたら**自動的に新しいリポジトリへ書き込み先を切り替える**機能を実装した(`vault.rs`)。
+
+- **索引リポジトリ**(`RRD_CATALOG_REPO`)を設定すると有効になる(未設定なら、これまでどおり単一
+  リポジトリのみで動く=自動引っ越しはしない)。索引には `catalog.json`(シャードの一覧と、ファイルパス
+  →現在のシャードの対応表)だけを持ち、このファイル自体はシャード数・パス数に比例するだけで、
+  実データにつれて大きくなり続けることはない。
+- **容量の確認**: GitHub API(`GET /repos/{owner}/{repo}`)で現在のシャードのサイズ(バイト)を、
+  10分に1回だけ確認する(書き込みのたびに API を叩くと遅く・レート制限にも近づくため)。
+  しきい値は既定 **8GB**(環境変数 `RRD_ARCHIVE_THRESHOLD_GB` で変更可、GitHub の推奨上限10GBに
+  余裕を持たせてある)。
+- **引っ越し**: しきい値を超えたら、GitHub API(`POST /orgs/{owner}/repos` または `/user/repos`)で
+  `<プレフィックス>-<連番>`(例: `realdata-archive-2`)という名前の非公開リポジトリを自動作成し、
+  以後の書き込みはすべてそちらへ向ける。古いシャードは「封印済み(sealed)」として読み込み専用のまま
+  残る(過去データは移動しない。コピーコストが大きいため)。
+- **API トークン**: `RRD_GITHUB_TOKEN`(無ければ `GITHUB_TOKEN`)を使う。git 本体の push/pull 認証
+  (credential store)とは別に、容量確認・新規リポジトリ作成という API 呼び出し専用。未設定の場合は
+  容量確認・自動作成ができないため、警告を出したうえで現在のシャードのまま動き続ける(既存の動作から
+  後退はしない)。
+- **読み込み**: データセット・毎朝の自動収集・地図データ(osm)のいずれも、まず索引でシャードを
+  特定し、無ければ新しい順にシャードを探す。版の履歴(`git log`)・過去の版の読み出しも、複数シャード
+  にまたがる場合はすべてのシャードから集めて束ね直す。
+- 開発機での検証: 単体テスト(`vault::tests`・`github::tests`)と、既存の `archive`/`store` の
+  テストがすべて通ることを確認した(GitHub の実 API・実リポジトリ作成は未検証。トークンを用意した
+  うえで VPS でのデプロイ後に確認する)。
+- 未実施: 実際に8GBへ到達させての引っ越しの実地検証(データ量的に当面先になる見込み)。
+
+### Automatic multi-repository failover for the archive (2026-09-28, English)
+
+GitHub recommends a 10GB-per-repository limit. Since everything was being written to the single
+`RRD_ARCHIVE_REPO`, that limit would eventually be approached. Implemented automatic rotation
+(`vault.rs`): when the current shard nears the limit, writes **automatically switch to a new repository**
+prepared in advance.
+
+- Enabled by setting a **catalog repository** (`RRD_CATALOG_REPO`); if unset, behavior is unchanged
+  (single repository, no rotation). The catalog holds only `catalog.json` (the list of shards and a
+  path → current-shard index), which stays small — it scales with the number of shards and paths, not
+  with the amount of data stored.
+- **Capacity check**: the current shard's size (bytes) is checked via the GitHub API
+  (`GET /repos/{owner}/{repo}`) at most once every 10 minutes (checking on every write would be slow and
+  approach rate limits). Default threshold is **8GB** (overridable via `RRD_ARCHIVE_THRESHOLD_GB`, leaving
+  headroom under GitHub's recommended 10GB).
+- **Rotation**: once the threshold is exceeded, a new private repository named `<prefix>-<n>` (e.g.
+  `realdata-archive-2`) is auto-created via the GitHub API (`POST /orgs/{owner}/repos` or `/user/repos`),
+  and all subsequent writes go there. The old shard is marked "sealed" and stays read-only (existing data
+  is never moved, since copying it would be expensive).
+- **API token**: uses `RRD_GITHUB_TOKEN` (or `GITHUB_TOKEN`), separate from git's own push/pull
+  credentials — used only for capacity checks and repo creation. If unset, a warning is logged and the
+  system keeps using the current shard (no regression from prior behavior).
+- **Reads**: datasets, daily automatic collection, and map data (osm) all first consult the catalog index
+  for the shard, falling back to searching shards newest-first. Version history (`git log`) and
+  historical reads are merged across shards when needed.
+- Verified on the dev machine: unit tests (`vault::tests`, `github::tests`) pass, and all existing
+  `archive`/`store` tests still pass (the real GitHub API / repo creation has not yet been exercised;
+  to be confirmed after deployment once a token is configured).
+- Not yet done: an actual end-to-end rotation at the 8GB threshold (unlikely to be reached for a while
+  given current data volume).
+
 ## 毎朝の自動収集(aruaru-search)の試験結果(2026-09-26)
 
 - 試験収集の1か所目(岩手県)は、27件の検索で70件を収集できた(以前は同じ場所が0件で失敗していた)。

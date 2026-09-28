@@ -41,6 +41,7 @@
 | 調査対象 URL からの取り込み(CSV・JSON・HTML の表) | 本リポジトリ(SSRF 対策付き) | ✅ |
 | AI による分析の説明(日本語・英語と約130言語から選択) | [aruaru-llm](https://github.com/aon-co-jp/aruaru-llm) | ✅ |
 | グラフ描画 | 棒・円グラフ(ブラウザ SVG)と、[open-directx](https://github.com/aon-co-jp/open-directx)(Vulkan)による GPU 描画。GPU が無ければ AVX-512 / AVX2 の CPU 描画 | ✅ |
+| データ保管庫(GitHub 非公開リポジトリ)の容量管理 | 1リポジトリ10GB上限に備え、索引リポジトリ設定時は容量が近づくと新しいリポジトリへ自動で引っ越す | ✅ 2026-09-28 |
 
 ## SAS Viya の特徴との対応
 

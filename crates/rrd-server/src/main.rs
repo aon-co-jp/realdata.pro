@@ -10,7 +10,10 @@
 //! 環境変数:
 //! - `RRD_BIND`      待受アドレス(既定 127.0.0.1:4701)
 //! - `RRD_MAX_BODY`  リクエストボディ上限バイト数(既定 32MiB)
-//! - `RRD_ARCHIVE_REPO`  保存先の GitHub 非公開リポジトリ(設定すると保存・版管理が使える。認証は git の設定に任せる)
+//! - `RRD_ARCHIVE_REPO`  保存先(現在のシャード)の GitHub 非公開リポジトリ(設定すると保存・版管理が使える。認証は git の設定に任せる)
+//! - `RRD_CATALOG_REPO`  複数シャードの索引を記録するリポジトリ(設定すると、容量上限に応じた自動引っ越しが有効になる)
+//! - `RRD_ARCHIVE_THRESHOLD_GB`  1シャードあたりの引っ越し判定のしきい値(既定 8、GitHub の推奨上限10GBに余裕を持たせる)
+//! - `RRD_GITHUB_TOKEN`(または `GITHUB_TOKEN`)  容量確認・新規リポジトリの自動作成に使う GitHub API トークン
 //! - `RRD_DATA_DIR`  収集結果の保存先(既定 data)
 //! - `RRD_ARUARU_LLM_URL`  aruaru-llm の URL(既定 http://127.0.0.1:4600、検索取り込みと AI 説明に使う)
 
@@ -18,6 +21,7 @@ mod archive;
 mod crawl;
 mod deposits;
 mod explain;
+mod github;
 mod ingest;
 mod languages;
 mod market;
@@ -28,6 +32,7 @@ mod research;
 mod schema;
 mod store;
 mod tuning;
+mod vault;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -109,6 +114,22 @@ async fn main() -> std::io::Result<()> {
     // 保存先: GitHub の非公開リポジトリ(VPS の DB・ディスクには保存しない)。
     // 接続できなくてもサーバーは起動し、保存・版管理だけ使えない状態にする。
     if let Some(repo) = archive::repo_from_env() {
+        // 保管庫の索引(複数シャード・容量に応じた自動引っ越し)。RRD_CATALOG_REPO が無ければ、
+        // 単一シャードのまま従来どおり動く(vault は「未初期化」として、以後すべての呼び出しが
+        // fallback = repo を素通しする)。
+        let catalog_repo = std::env::var("RRD_CATALOG_REPO")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let threshold_gb = std::env::var("RRD_ARCHIVE_THRESHOLD_GB")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok());
+        let rotation_enabled = catalog_repo.is_some();
+        if let Err(e) = vault::connect(&repo, catalog_repo, threshold_gb).await {
+            eprintln!("realdata.pro: 保管庫の索引を初期化できません({e:#})");
+        } else if rotation_enabled {
+            println!("realdata.pro: 保管庫の自動引っ越し(容量上限に応じた複数シャード)が有効です");
+        }
         match store::Store::connect(&repo).await {
             Ok(s) => state.store = Some(s),
             Err(e) => eprintln!("realdata.pro: 保存先(GitHub)を使えません({e:#})"),
