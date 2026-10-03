@@ -2,7 +2,7 @@
 //!
 //! GitHub は1リポジトリあたり10GBを推奨上限としている(超えると警告・将来の制限の対象になりうる)。
 //! `RRD_ARCHIVE_REPO` の1リポジトリだけに保存し続けるとこの上限に近づいていくため、現在書き込み中の
-//! シャードのサイズを定期的に確かめ(GitHub API)、しきい値(既定8GB)を超えたら、あらかじめ用意して
+//! シャードのサイズを定期的に確かめ(GitHub API)、しきい値(既定1GB、2026-10-03に8GBから変更)を超えたら、あらかじめ用意して
 //! おいた次のシャードへ**自動的に書き込み先を切り替える**(「引っ越す」)。次のシャードが無ければ、
 //! GitHub API で新しいリポジトリを自動作成する。
 //!
@@ -24,8 +24,27 @@ use crate::archive;
 use crate::github;
 
 const CATALOG_FILE: &str = "catalog.json";
-/// このバイト数を超えたら次のシャードへ引っ越す(GitHub の推奨上限10GBに余裕を持たせる)
-const DEFAULT_THRESHOLD_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+/// このバイト数を超えたら次のシャードへ引っ越す。
+/// 2026-10-03変更(ユーザー指示「推薦の1GBに下げて」): 8GB → 1GB。GitHub公式の推奨は
+/// 「1リポジトリ1GB未満」、ソフト上限は5GB(旧既定の8GBは上限を超えていた)。
+const DEFAULT_THRESHOLD_BYTES: u64 = 1024 * 1024 * 1024;
+/// しきい値に達するまでの見込みがこの日数以内になったら、次のシャードを先行作成する
+/// (切り替え自体はしきい値に達してから。ユーザー指示「溢れる前に予測して…あらかじめ作っておいて」)。
+const PRECREATE_WITHIN_DAYS: f64 = 14.0;
+
+/// 増加ペース(作成からの平均、バイト/秒)から、しきい値に達するまでの日数を見積もる。
+/// 作成直後や増えていない(ペースが0以下)場合は見積もれないので`None`。
+/// 既にしきい値以上なら`Some(0.0)`。
+fn predict_days_to_threshold(size: u64, age_secs: u64, threshold: u64) -> Option<f64> {
+    if size >= threshold {
+        return Some(0.0);
+    }
+    if age_secs == 0 || size == 0 {
+        return None;
+    }
+    let rate = size as f64 / age_secs as f64; // バイト/秒
+    Some((threshold - size) as f64 / rate / 86_400.0)
+}
 /// シャードのサイズは GitHub API を毎回叩かず、この間隔でだけ確かめる(書き込みのたびに叩くと遅く・
 /// API のレート制限にも近づくため)
 const SIZE_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(600);
@@ -55,6 +74,9 @@ struct Inner {
     catalog: CatalogFile,
     last_size_check: Option<std::time::Instant>,
     dirty: bool,
+    /// 先行作成を試みた次のシャード名(同じ名前で何度も作成を試みないため。再起動すると忘れるが、
+    /// 作成は同名があればそのまま使う(冪等)ので問題ない)
+    standby_attempted: Option<String>,
 }
 
 pub struct Vault(Mutex<Inner>);
@@ -99,6 +121,7 @@ pub async fn connect(
         catalog,
         last_size_check: None,
         dirty: false,
+        standby_attempted: None,
     };
     VAULT
         .set(Vault(Mutex::new(inner)))
@@ -160,7 +183,29 @@ impl Vault {
                 );
                 self.rotate(inner).await;
             }
-            Ok(_) => {}
+            Ok(size) => {
+                // 増加ペースから見込みを立て、しきい値に近づいていたら次のシャードを先に作っておく。
+                let age = (crate::market::now_unix() as i64 - last.created_unix).max(0) as u64;
+                let predicted = predict_days_to_threshold(size, age, inner.threshold_bytes);
+                if let Some(days) = predicted {
+                    if days <= PRECREATE_WITHIN_DAYS {
+                        let n = inner.catalog.shards.len() + 1;
+                        let name = format!("{}-{n}", inner.new_repo_prefix);
+                        if inner.standby_attempted.as_deref() != Some(name.as_str()) {
+                            inner.standby_attempted = Some(name.clone());
+                            if let Some(owner) = inner.new_repo_owner.clone() {
+                                eprintln!(
+                                    "realdata.pro: 保管庫 {} はあと約{days:.1}日でしきい値に達する見込みです。次のシャード {name} を先行作成します",
+                                    last.repo
+                                );
+                                if let Err(e) = github::create_private_repo(&owner, &name).await {
+                                    eprintln!("realdata.pro: 次のシャードの先行作成に失敗しました({e:#})。しきい値到達時に再試行します");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Err(e) => eprintln!(
                 "realdata.pro: 保管庫のサイズを確認できません({e:#})。しきい値の判定は次回まで見送ります"
             ),
@@ -326,6 +371,38 @@ pub async fn read_first(fallback: &str, path: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_threshold_is_the_recommended_one_gib() {
+        assert_eq!(DEFAULT_THRESHOLD_BYTES, 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn predict_days_to_threshold_uses_average_growth_since_creation() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        const DAY: u64 = 86_400;
+        // 10日で0.5GiB増えた → 毎日0.05GiB → 残り0.5GiBまで10日。
+        let days = predict_days_to_threshold(GIB / 2, 10 * DAY, GIB).unwrap();
+        assert!((days - 10.0).abs() < 0.01, "got {days}");
+        // しきい値以上なら0日。
+        assert_eq!(predict_days_to_threshold(GIB, DAY, GIB), Some(0.0));
+        assert_eq!(predict_days_to_threshold(2 * GIB, DAY, GIB), Some(0.0));
+        // 作成直後(年齢0)や、まだ何も入っていない(サイズ0)場合は見積もれない。
+        assert_eq!(predict_days_to_threshold(1000, 0, GIB), None);
+        assert_eq!(predict_days_to_threshold(0, 10 * DAY, GIB), None);
+    }
+
+    #[test]
+    fn precreate_window_triggers_only_when_close() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        const DAY: u64 = 86_400;
+        // 現状(482KBが作成から約8日): 到達まで非常に長く、先行作成しない。
+        let far = predict_days_to_threshold(482 * 1024, 8 * DAY, GIB).unwrap();
+        assert!(far > PRECREATE_WITHIN_DAYS, "got {far}");
+        // 30日で0.9GiB → 残り0.1GiBまで約3.3日、先行作成する。
+        let near = predict_days_to_threshold(GIB * 9 / 10, 30 * DAY, GIB).unwrap();
+        assert!(near <= PRECREATE_WITHIN_DAYS, "got {near}");
+    }
 
     #[test]
     fn catalog_round_trips_through_json() {
