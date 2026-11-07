@@ -457,3 +457,8 @@ Reading into `serde_json::Value` gives almost no speed-up even with SIMD (188 ms
 - aruaru-llm の REST 全廃に伴い、本リポジトリの呼び出し先を `POST /aruaru_llm.v1.Llm/<Method>`(JSON本文)へ変更した(旧 `/v1/...` は aruaru-llm 側で削除済み)。
 - 対象は aruaru-llm を呼ぶ箇所のみ。本リポジトリ自身のAPI・他サービス(aruaru-search 等)の呼び出しは別途。
 - 未検証: ビルド/実サーバー往復(aruaru-llm の `connect-migration` ブランチが VPS 未反映のため)。aruaru-llm の main マージ・VPS反映と同時に反映すること。
+
+## お引越しの実地確認結果(2026-11-08)/ Live rotation check result
+
+- 日本語: 使い捨てリポジトリ(しきい値 約1KB、本番とは別ポート・別データ)で実地確認した。容量超過を検知して `…-archive-2` を自動作成し書き込み先を切替、旧シャードは sealed(読み込み専用)になり、さらに `…-archive-3` へも連鎖して引っ越した。`catalog.json` の索引は各ファイルを正しいシャードへ指す。23か所の毎朝収集も途切れず保存された。検証用の実体(systemd 一時ユニット・/tmp のトークン入りファイル)は削除、使い捨てリポジトリ3件はアーカイブ済み(削除は所有者が行う)。
+- English: Verified live with throwaway repos (threshold ~1 KB, separate port and data). On exceeding the threshold the server auto-created `…-archive-2`, switched writes, sealed the old shard read-only, and chained again to `…-archive-3`. The `catalog.json` index points each file to the right shard, and the 23-place daily crawl was saved without interruption. Test unit and token-bearing files were removed; the three throwaway repos are archived (deletion is left to the owner).
