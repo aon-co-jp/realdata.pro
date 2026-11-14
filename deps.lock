@@ -6,11 +6,11 @@
 # fetch-deps を再実行し、テストが通ることを確認してからコミットする。
 #
 # 名前 URL コミット
-RPoem           https://github.com/aon-co-jp/RPoem.git           5291d751979a3fd9fb46e117f93f7ba5d12147bc
+RPoem           https://github.com/aon-co-jp/RPoem.git           99629c82e37c970d41680dd4a9a5937415308213
 open-cuda       https://github.com/aon-co-jp/open-cuda.git       ec189208d72763bef9c5dc118566b8b62144c6bd
 open-cpu        https://github.com/aon-co-jp/open-cpu.git        1ac7b45a635d105dd7177c7f14e1db6f91966eb3
 open-web-server https://github.com/aon-co-jp/open-web-server.git d5f590e9bf33ecb1f199cade4c4783227c6ca355
 open-raid-z     https://github.com/aon-co-jp/open-raid-z.git     3ebe82ca6c51579019f77625d686a84aa58917a0
 RS-SmartTCP     https://github.com/aon-co-jp/RS-SmartTCP.git     e60612e64a57f4e870ca0e8aa56f13485858d7c7
 open-directx    https://github.com/aon-co-jp/open-directx.git    e55cefa3cb68d12151e3c79fbf640f67ccc86f7e
-RS-JSON         https://github.com/aon-co-jp/RS-JSON.git         057bded762911e8a4dcbccc3d06240074305bea5
+RS-JSON         https://github.com/aon-co-jp/RS-JSON.git         291195fa9cde71be965108f4dbd74945c6a3662f

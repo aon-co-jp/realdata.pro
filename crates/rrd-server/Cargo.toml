@@ -25,14 +25,14 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "signa
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rust-json = { path = "../../.deps/RS-JSON" }
-sonic-rs = "0.3"
+sonic-rs = "0.5"
 http-body-util = "0.1"
 bytes = "1"
 anyhow = "1"
 futures = "0.3"
 # 調査対象 URL の取得と aruaru-llm 呼び出し(エコシステム既定の rustls、OpenSSL 不要)
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-scraper = "0.20"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form"] }
+scraper = "0.29"
 # 財務省の国債金利 CSV(Shift_JIS)を読むため
 encoding_rs = "0.8"
 # aruaru-db(pgwire 互換)への接続・永続化と版管理

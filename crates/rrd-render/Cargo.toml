@@ -13,4 +13,4 @@ rust-version = "1.89"
 directx-graphics-vulkan = { path = "../../.deps/open-directx/crates/directx-graphics-vulkan" }
 directx-shader-translate = { path = "../../.deps/open-directx/crates/directx-shader-translate" }
 open-cpu = { path = "../../.deps/open-cpu" }
-png = "0.17"
+png = "0.18"
