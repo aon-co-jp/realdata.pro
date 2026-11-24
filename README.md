@@ -1,3 +1,5 @@
+> Latest translations / 翻訳の最新版: [0-LATEST-TRANSLATIONS.md](0-LATEST-TRANSLATIONS.md)
+
 # realdata.pro
 
 **誰でも使える、Rust製・オープンソースのデータ分析プラットフォーム**(SAS Viyaの考え方を参考にした自由実装)。
