@@ -52,7 +52,7 @@ pub async fn import_search(
     max_results: u8,
 ) -> Result<Imported> {
     let resp = http
-        .post(format!("{}/aruaru_llm.v1.Llm/SearchRaw", llm_base.trim_end_matches('/')))
+        .post(format!("{}/aruaru_llm.Llm/SearchRaw", llm_base.trim_end_matches('/')))
         .header("x-tenant", "realdata-pro")
         .json(&serde_json::json!({ "source": source.as_str(), "query": query, "max_results": max_results }))
         .timeout(Duration::from_secs(30))

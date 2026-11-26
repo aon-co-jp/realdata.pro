@@ -100,7 +100,7 @@ pub async fn complete(
     prompt: &str,
 ) -> Result<(String, Option<String>)> {
     let url = format!(
-        "{}/aruaru_llm.v1.Llm/ChatProvidersCompletePriority",
+        "{}/aruaru_llm.Llm/ChatProvidersCompletePriority",
         llm_base.trim_end_matches('/')
     );
     let resp = http
