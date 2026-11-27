@@ -1,3 +1,3 @@
 source: aon-co-jp/realdata.pro
-commit: f11cdd72d9929c40a26bb93ddd36e3d0cda51140
-updated: 2026-11-25T04:48:24Z
+commit: e37ff062bacff92260afa4ff01f837fd2af8de01
+updated: 2026-11-27T05:29:01Z
